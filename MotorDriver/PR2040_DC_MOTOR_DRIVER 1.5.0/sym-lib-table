@@ -1,0 +1,11 @@
+(sym_lib_table
+  (lib (name "INA21x_SC70")(type "KiCad")(uri "${KIPRJMOD}/libraries/INA21x_SC70.kicad_sym")(options "")(descr ""))
+  (lib (name "SW_SKSGACE010")(type "KiCad")(uri "${KIPRJMOD}/libraries/SW_SKSGACE010.kicad_sym")(options "")(descr ""))
+  (lib (name "TB67H451")(type "KiCad")(uri "${KIPRJMOD}/libraries/TB67H451.kicad_sym")(options "")(descr ""))
+  (lib (name "NINA-W10")(type "KiCad")(uri "${KIPRJMOD}/libraries/NINA-W10.kicad_sym")(options "")(descr ""))
+  (lib (name "BatteryProtectionIC")(type "KiCad")(uri "${KIPRJMOD}/libraries/BatteryProtectionIC.kicad_sym")(options "")(descr ""))
+  (lib (name "BatteryCharger")(type "KiCad")(uri "${KIPRJMOD}/libraries/BatteryCharger.kicad_sym")(options "")(descr ""))
+  (lib (name "USB Protection")(type "KiCad")(uri "F:/Users/OneDrive/CraftWork/ConvenientSystem/CommonPR2040/PR2040_BASESYSTEM/libraries/USB Protection.kicad_sym")(options "")(descr ""))
+  (lib (name "connector_local")(type "KiCad")(uri "${KIPRJMOD}/libraries/connector_local.kicad_sym")(options "")(descr ""))
+  (lib (name "MCP1792")(type "KiCad")(uri "${KIPRJMOD}/libraries/MCP1792.kicad_sym")(options "")(descr ""))
+)

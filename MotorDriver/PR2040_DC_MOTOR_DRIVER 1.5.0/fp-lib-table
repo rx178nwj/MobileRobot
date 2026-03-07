@@ -1,0 +1,11 @@
+(fp_lib_table
+  (lib (name "RP2040_minimal")(type "KiCad")(uri "${KIPRJMOD}/PR2040_BASESYSTEM.pretty")(options "")(descr ""))
+  (lib (name "Crystal_SMD_M405")(type "KiCad")(uri "F:/Users/OneDrive/CraftWork/ConvenientSystem/CommonPR2040/Sample/RP2040_minimal/Crystal_SMD_M405.pretty")(options "")(descr ""))
+  (lib (name "SW_SKSGACE010")(type "KiCad")(uri "F:/Users/OneDrive/CraftWork/ConvenientSystem/CommonPR2040/Sample/RP2040_minimal/SW_SKSGACE010.pretty")(options "")(descr ""))
+  (lib (name "CT-6")(type "KiCad")(uri "F:/Users/OneDrive/CraftWork/ConvenientSystem/CommonPR2040/Sample/RP2040_minimal/CT-6.pretty")(options "")(descr ""))
+  (lib (name "NINA_W10")(type "KiCad")(uri "${KIPRJMOD}/libraries/NINA_W10.pretty")(options "")(descr ""))
+  (lib (name "connector_ZH")(type "KiCad")(uri "${KIPRJMOD}/libraries/connector_ZH.pretty")(options "")(descr ""))
+  (lib (name "Connector_PA")(type "KiCad")(uri "F:/Users/OneDrive/CraftWork/ConvenientSystem/CommonPR2040/PR2040_BASESYSTEM/libraries/Connector_PA.pretty")(options "")(descr ""))
+  (lib (name "SR54F")(type "KiCad")(uri "${KIPRJMOD}/libraries/SR54F.pretty")(options "")(descr ""))
+  (lib (name "LocalConnector")(type "KiCad")(uri "${KIPRJMOD}/libraries/LocalConnector.pretty")(options "")(descr ""))
+)

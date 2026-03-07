@@ -1,0 +1,32 @@
+{
+    "configurations": [
+        {
+            "name": "RP2040 (arduino-pico)",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${env:LOCALAPPDATA}/Arduino15/packages/rp2040/hardware/rp2040/5.5.1/**",
+                "${env:LOCALAPPDATA}/Arduino15/packages/rp2040/tools/pqt-gcc/4.1.0-1aec55e/arm-none-eabi/include/**",
+                "${env:LOCALAPPDATA}/Arduino15/packages/rp2040/tools/pqt-gcc/4.1.0-1aec55e/lib/gcc/arm-none-eabi/**"
+            ],
+            "defines": [
+                "ARDUINO=10607",
+                "ARDUINO_ARCH_RP2040",
+                "ARDUINO_RASPBERRY_PI_PICO",
+                "F_CPU=133000000L",
+                "PICO_RP2040=1"
+            ],
+            "compilerPath": "C:/Users/watan/AppData/Local/Arduino15/packages/rp2040/tools/pqt-gcc/4.1.0-1aec55e/bin/arm-none-eabi-gcc.exe",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "gcc-arm",
+            "browse": {
+                "path": [
+                    "${workspaceFolder}",
+                    "${env:LOCALAPPDATA}/Arduino15/packages/rp2040/hardware/rp2040/5.5.1"
+                ],
+                "limitSymbolsToIncludedHeaders": false
+            }
+        }
+    ],
+    "version": 4
+}
