@@ -52,11 +52,19 @@ public:
     float getVelocity()       const { return _velocity; }
     int32_t getVelocityInt()  const { return (int32_t)_velocity; }
 
+    // Physical unit velocity [mm/sec]
+    float getVelocityMmps()     const { return _velocity * CPS_TO_MMPS; }
+    void  setVelocityMmps(float mmps) { setVelocityTarget(mmps / CPS_TO_MMPS); }
+
     // --- POSITION ---
     // target: absolute encoder count
     void    setPositionTarget(int32_t counts);
     int32_t getPositionTarget() const { return _posTarget; }
     int32_t getPosition()       const { return _encoder.getCount(); }
+
+    // Physical unit position [mm] from last encoder reset
+    float getPositionMm()   const { return (float)_encoder.getCount() * COUNTS_TO_MM; }
+    void  setPositionMm(float mm) { setPositionTarget((int32_t)(mm / COUNTS_TO_MM)); }
 
     // --- PID configuration ---
     // Velocity inner loop (used in both VELOCITY and POSITION modes)

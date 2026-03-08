@@ -90,6 +90,7 @@
  *   0x04  CMD_SET_MOTOR_SINGLE data: uint8 index(0-3), int16 duty
  *   0x10  CMD_REQUEST_STATUS   data: none (triggers one status packet)
  *   0x11  CMD_RESET_ENCODERS   data: none
+ *   0x12  CMD_REQUEST_EXT_ADC  data: none → RESP_EXT_ADC int16 x8 (16 B)
  *   0x20  CMD_SET_MODE_ALL     data: uint8 x4  (0=DIRECT,1=VEL,2=POS)
  *   0x21  CMD_SET_MODE_SINGLE  data: uint8 index, uint8 mode
  *   0x22  CMD_SET_VEL_ALL      data: float x4  velocity targets (cps)
@@ -100,20 +101,26 @@
  *   0x27  CMD_SET_POS_GAINS    data: uint8 index, float posKp, maxVelCps
  *
  * Responses (Board -> Host):
- *   0x80  RESP_ACK    data: [cmd]
- *   0x81  RESP_NAK    data: [cmd]
- *   0x91  RESP_STATUS [44 B] enc(int32x4)+vel(int32x4)+adc(int16x4)+ts(uint32)
+ *   0x80  RESP_ACK     data: [cmd]
+ *   0x81  RESP_NAK     data: [cmd]
+ *   0x91  RESP_STATUS  [44 B] enc(int32x4)+vel(int32x4)+adc(int16x4)+ts(uint32)
+ *   0x92  RESP_EXT_ADC [16 B] int16 x8 MCP3208 ch0..7
  *
  * Status is also sent automatically at STATUS_INTERVAL_MS (10 ms = 100 Hz).
  */
 
 #include <Wire.h>
+#include <SPI.h>
 #include "Config.h"
 #include "WheelController.h"
+#include "MCP3208.h"
+#include "SensorConverter.h"
 
 // ---------------------------------------------------------------------------
 // Instances
 // ---------------------------------------------------------------------------
+static MCP3208 extAdc(SPI0_CSN_PIN, SPI);
+
 static WheelController wheels[4] = {
     WheelController(MOTOR1_IN1, MOTOR1_IN2, ENC1_A, ENC1_B),
     WheelController(MOTOR2_IN1, MOTOR2_IN2, ENC2_A, ENC2_B),
@@ -145,10 +152,18 @@ static uint8_t  i2cWriteLen  = 0;
 static volatile bool i2cWritePending = false;
 
 // ---------------------------------------------------------------------------
+// External ADC buffer (updated periodically in loop, served from cache)
+// ---------------------------------------------------------------------------
+static int16_t  extAdcBuf[8] = {0};  // MCP3208 ch0..7, last sampled values
+
+// ---------------------------------------------------------------------------
 // Timing
 // ---------------------------------------------------------------------------
-static uint32_t lastStatusMs  = 0;
-static uint32_t lastControlMs = 0;
+static uint32_t lastStatusMs   = 0;
+static uint32_t lastControlMs  = 0;
+static uint32_t lastExtAdcMs   = 0;
+
+static constexpr uint32_t EXT_ADC_INTERVAL_MS = 10;  // 100 Hz
 
 // ---------------------------------------------------------------------------
 // Forward declarations
@@ -159,6 +174,7 @@ static void     sendAck(uint8_t cmd);
 static void     sendNak(uint8_t cmd);
 static uint8_t  calcChecksum(uint8_t cmd, uint8_t len, const uint8_t* data);
 static void     emergencyStop();
+static void     sendExtAdc();
 static void     buildI2CReadBuffer(uint8_t reg);
 static void     processI2CWrite(const uint8_t* data, uint8_t len);
 static void     onI2CReceive(int numBytes);
@@ -182,6 +198,12 @@ void setup() {
 
     // Internal ADC resolution: 12 bit
     analogReadResolution(12);
+
+    // SPI0 for MCP3208 external ADC
+    SPI.setRX(SPI0_RX_PIN);
+    SPI.setSCK(SPI0_SCK_PIN);
+    SPI.setTX(SPI0_TX_PIN);
+    extAdc.begin();  // also sets CS pin high
 
     // IMU interrupt pin
     pinMode(IMU_INT_PIN, INPUT);
@@ -207,6 +229,10 @@ void setup() {
     uint32_t now = millis();
     lastControlMs = now;
     lastStatusMs  = now;
+    lastExtAdcMs  = now;
+
+    // Initial ADC sample so buffer is valid immediately
+    extAdc.readAll(extAdcBuf);
 
     Serial.println("PR2040_MotorDriver Ready");
 }
@@ -224,6 +250,12 @@ void loop() {
         for (int i = 0; i < 4; i++) {
             wheels[i].update(dt);
         }
+    }
+
+    // --- External ADC periodic sampling (EXT_ADC_INTERVAL_MS = 10 ms) ---
+    if (now - lastExtAdcMs >= EXT_ADC_INTERVAL_MS) {
+        lastExtAdcMs = now;
+        extAdc.readAll(extAdcBuf);
     }
 
     // --- Parse incoming serial bytes ---
@@ -348,6 +380,11 @@ static void processPacket(uint8_t cmd, const uint8_t* data, uint8_t len) {
     case CMD_RESET_ENCODERS: {
         for (int i = 0; i < 4; i++) wheels[i].resetEncoder();
         sendAck(cmd);
+        break;
+    }
+
+    case CMD_REQUEST_EXT_ADC: {
+        sendExtAdc();
         break;
     }
 
@@ -540,6 +577,24 @@ static void emergencyStop() {
 }
 
 // ---------------------------------------------------------------------------
+// sendExtAdc
+// Response data layout (16 bytes): int16 x8 MCP3208 ch0..7 (little-endian)
+// ---------------------------------------------------------------------------
+static void sendExtAdc() {
+    constexpr uint8_t DATA_LEN = 16;
+    uint8_t data[DATA_LEN];
+    for (int i = 0; i < 8; i++) {
+        memcpy(&data[i * 2], &extAdcBuf[i], 2);
+    }
+    uint8_t cksum = calcChecksum(RESP_EXT_ADC, DATA_LEN, data);
+    Serial.write(PACKET_HEADER);
+    Serial.write(RESP_EXT_ADC);
+    Serial.write(DATA_LEN);
+    Serial.write(data, DATA_LEN);
+    Serial.write(cksum);
+}
+
+// ---------------------------------------------------------------------------
 // buildI2CReadBuffer
 // Called when the controller sets a register address (read preparation).
 // Fills i2cReadBuf / i2cReadLen with the data for that register.
@@ -584,6 +639,30 @@ static void buildI2CReadBuffer(uint8_t reg) {
         memcpy(&i2cReadBuf[off], &ts, 4);
         off += 4;
         i2cReadLen = off;  // 44
+
+    } else if (reg >= REG_EXT_ADC0 && reg <= REG_EXT_ADC0 + 7) {
+        // Single MCP3208 channel from buffer (int16, 2 bytes)
+        memcpy(i2cReadBuf, &extAdcBuf[reg - REG_EXT_ADC0], 2);
+        i2cReadLen = 2;
+
+    } else if (reg == REG_EXT_ADC_ALL) {
+        // All 8 MCP3208 channels from buffer (int16 x8, 16 bytes)
+        for (int i = 0; i < 8; i++) {
+            memcpy(&i2cReadBuf[i * 2], &extAdcBuf[i], 2);
+        }
+        i2cReadLen = 16;
+
+    } else if (reg >= REG_CURR0 && reg <= REG_CURR0 + 3) {
+        // Motor current [A] converted from MCP3208 ch0-3 buffer
+        float curr = SensorConverter::toCurrentA(extAdcBuf[reg - REG_CURR0]);
+        memcpy(i2cReadBuf, &curr, 4);
+        i2cReadLen = 4;
+
+    } else if (reg == REG_VBATT) {
+        // Battery voltage [V] converted from MCP3208 ch4 buffer
+        float vbatt = SensorConverter::toBatteryV(extAdcBuf[4]);
+        memcpy(i2cReadBuf, &vbatt, 4);
+        i2cReadLen = 4;
 
     } else if (reg == REG_DEVICE_ID) {
         i2cReadBuf[0] = 0x20;

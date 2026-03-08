@@ -96,6 +96,28 @@ constexpr uint8_t SPI0_CSN_PIN = 5;   // Chip Select
 constexpr uint8_t SPI0_SCK_PIN = 6;   // Clock
 constexpr uint8_t SPI0_TX_PIN  = 7;   // MOSI
 
+// --- Wheel Physical Parameters -----------------------------------------------
+// Wheel outer diameter [mm]
+constexpr float WHEEL_DIAMETER_MM      = 67.5f;
+constexpr float WHEEL_CIRCUMFERENCE_MM = 3.14159265f * WHEEL_DIAMETER_MM;  // ≈ 212.06 mm
+
+// --- Encoder Physical Parameters ---------------------------------------------
+// Motor: JGA25-370 DC geared motor, 12V, 620 RPM (no-load)
+// Encoder: 11 PPR (pulses per revolution) on the motor shaft, quadrature (A+B)
+// 4x quadrature decode → 44 counts per motor shaft revolution
+// Gear ratio ≈ 18.8 (motor ~11600 RPM / 620 RPM output)
+// Effective counts per wheel revolution = 11 × 4 × 18.8 ≈ 827.2
+//
+// Calibration: rotate wheel exactly 1 turn, read encoder count.
+// Set ENCODER_GEAR_RATIO = measured_count / (ENCODER_PPR * 4).
+constexpr float ENCODER_PPR        = 11.0f;   // pulses/motor-rev (1 channel)
+constexpr float ENCODER_GEAR_RATIO = 18.8f;   // gearbox reduction ratio
+constexpr float ENCODER_CPR        = ENCODER_PPR * 4.0f * ENCODER_GEAR_RATIO;  // ≈ 827.2
+
+// Conversion factors
+constexpr float CPS_TO_MMPS  = WHEEL_CIRCUMFERENCE_MM / ENCODER_CPR;  // (counts/sec) → (mm/sec)
+constexpr float COUNTS_TO_MM = WHEEL_CIRCUMFERENCE_MM / ENCODER_CPR;  // counts → mm
+
 // --- PWM Settings ------------------------------------------------------------
 constexpr uint32_t PWM_FREQ_HZ = 20000;   // 20 kHz
 constexpr int32_t  PWM_DUTY_MAX = 1000;   // duty: -1000 to +1000
@@ -123,6 +145,7 @@ constexpr uint8_t CMD_BRAKE_ALL        = 0x03; // data: none  (active brake)
 constexpr uint8_t CMD_SET_MOTOR_SINGLE = 0x04; // data: uint8 index, int16 duty
 constexpr uint8_t CMD_REQUEST_STATUS   = 0x10; // data: none
 constexpr uint8_t CMD_RESET_ENCODERS   = 0x11; // data: none
+constexpr uint8_t CMD_REQUEST_EXT_ADC  = 0x12; // data: none → RESP_EXT_ADC (16 B)
 // Wheel controller commands
 constexpr uint8_t CMD_SET_MODE_ALL     = 0x20; // data: uint8 x4  (0=DIRECT,1=VEL,2=POS)
 constexpr uint8_t CMD_SET_MODE_SINGLE  = 0x21; // data: uint8 index, uint8 mode
@@ -134,13 +157,26 @@ constexpr uint8_t CMD_SET_VEL_PID      = 0x26; // data: uint8 index, float kp, k
 constexpr uint8_t CMD_SET_POS_GAINS    = 0x27; // data: uint8 index, float posKp, maxVelCps
 
 // Responses (RP2040 -> Host)
-constexpr uint8_t RESP_ACK    = 0x80; // data: echo cmd byte
-constexpr uint8_t RESP_NAK    = 0x81; // data: echo cmd byte
-constexpr uint8_t RESP_STATUS = 0x91; // see sendStatus() for layout
+constexpr uint8_t RESP_ACK     = 0x80; // data: echo cmd byte
+constexpr uint8_t RESP_NAK     = 0x81; // data: echo cmd byte
+constexpr uint8_t RESP_STATUS  = 0x91; // see sendStatus() for layout
+constexpr uint8_t RESP_EXT_ADC = 0x92; // data: int16 x8 (16 B) MCP3208 ch0..7
 
 // Status packet data length (44 bytes):
 //   [0..15]  int32 x4  encoder counts
 //   [16..31] int32 x4  velocities (counts/sec, truncated to int)
-//   [32..39] int16 x4  ADC raw 0..4095
+//   [32..39] int16 x4  internal ADC raw 0..4095 (current sense)
 //   [40..43] uint32    timestamp (millis)
 constexpr uint8_t STATUS_DATA_LEN = 44;
+
+// External ADC (MCP3208) — I2C read registers (raw)
+//   REG_EXT_ADC0..7  [2 B each]  int16 MCP3208 ch0..7 (0..4095, little-endian)
+//   REG_EXT_ADC_ALL  [16 B]      int16 x8 all channels
+constexpr uint8_t REG_EXT_ADC0    = 0x40;  // 0x40-0x47
+constexpr uint8_t REG_EXT_ADC_ALL = 0x48;  // all 8 channels at once (16 B)
+
+// Physical value registers — I2C read (converted from MCP3208)
+//   REG_CURR0..3  [4 B each]  float motor current [A] (little-endian)
+//   REG_VBATT     [4 B]       float battery voltage [V] (little-endian)
+constexpr uint8_t REG_CURR0  = 0x50;  // 0x50-0x53  float [A]
+constexpr uint8_t REG_VBATT  = 0x54;  // float [V]

@@ -311,3 +311,215 @@ send_cmd(0x02)
 - カウント値: `int32_t`（符号付き32bit、オーバーフローまで約21億パルス）
 - スレッドセーフ: `getCount()` / `resetCount()` は割り込み禁止区間で保護
 - Gray-codeルックアップテーブルによる高速デコード
+
+---
+
+## システム構成
+
+### ハードウェアブロック図
+
+```mermaid
+graph TD
+    Controller["上位コントローラ\n(Raspberry Pi 等)"]
+
+    subgraph BOARD["PR2040_BASESYSTEM REV1.5.0"]
+        subgraph MCU["RP2040 MCU"]
+            WC0["WheelController 0\nPID / 位置制御\n200 Hz"]
+            WC1["WheelController 1\nPID / 位置制御\n200 Hz"]
+            WC2["WheelController 2\nPID / 位置制御\n200 Hz"]
+            WC3["WheelController 3\nPID / 位置制御\n200 Hz"]
+        end
+
+        TB0["TB67H451\nMotor1\nGPIO8/9"]
+        TB1["TB67H451\nMotor2\nGPIO10/11"]
+        TB2["TB67H451\nMotor3\nGPIO14/15"]
+        TB3["TB67H451\nMotor4\nGPIO16/17"]
+
+        ENC0["Encoder1\nGPIO18/19"]
+        ENC1["Encoder2\nGPIO20/21"]
+        ENC2["Encoder3\nGPIO22/23"]
+        ENC3["Encoder4\nGPIO24/25"]
+
+        MCP["MCP3208\n外部ADC 8ch\nSPI0 100Hz\nGPIO4-7"]
+        INA["INA213 ×4\n電流センスアンプ\nGain=50, 10mΩ"]
+        IMU["MPU-6881\nIMU 6軸\nI2C0\nGPIO12/13"]
+        USB["USB Serial\nCDC 115200bps\nバイナリプロトコル"]
+    end
+
+    M0["Motor1"]
+    M1["Motor2"]
+    M2["Motor3"]
+    M3["Motor4"]
+    BAT["バッテリ"]
+
+    Controller -->|"I2C スレーブ\naddr=0x60\nGPIO2/3"| MCU
+
+    WC0 -->|PWM| TB0
+    WC1 -->|PWM| TB1
+    WC2 -->|PWM| TB2
+    WC3 -->|PWM| TB3
+
+    TB0 --- M0
+    TB1 --- M1
+    TB2 --- M2
+    TB3 --- M3
+
+    M0 -->|A/B相| ENC0
+    M1 -->|A/B相| ENC1
+    M2 -->|A/B相| ENC2
+    M3 -->|A/B相| ENC3
+
+    ENC0 -->|count| WC0
+    ENC1 -->|count| WC1
+    ENC2 -->|count| WC2
+    ENC3 -->|count| WC3
+
+    M0 -->|電流| INA
+    M1 -->|電流| INA
+    M2 -->|電流| INA
+    M3 -->|電流| INA
+    BAT -->|電圧 分圧1/11| MCP
+    INA -->|ch0-3| MCP
+    MCP -->|SPI| MCU
+    IMU -->|I2C| MCU
+    MCU <-->|USB CDC| USB
+```
+
+### ソフトウェア構成図
+
+```mermaid
+graph TD
+    subgraph LOOP["loop() メインループ"]
+        CTRL["制御ループ\n5ms周期 / 200Hz\nWheelController×4\n.update(dt)"]
+        ADCL["外部ADCループ\n10ms周期 / 100Hz\nMCP3208.readAll()\nextAdcBuf更新"]
+        STS["ステータス送信\n10ms周期 / 100Hz\nsendStatus()\nUSB Serial"]
+    end
+
+    subgraph ISR["割り込みハンドラ (ISR)"]
+        I2CR["onI2CReceive()\n書き込み→デファー\n読み出しアドレス設定"]
+        I2CS["onI2CRequest()\ni2cReadBuf送信"]
+        ENCR["Encoder ISR ×4\nGray-codeデコード\ncount更新"]
+    end
+
+    subgraph WC["WheelController 内部構造"]
+        ENC_SW["Encoder\nA/B相 4倍デコード\nint32 count"]
+        PID_SW["速度PID\nKp/Ki/Kd\n微分 on 測定値\nアンチワインドアップ"]
+        MOT_SW["Motor\nTB67H451\nPWM 20kHz\nduty ±1000"]
+
+        ENC_SW -->|"velocity\n(counts/sec)"| PID_SW
+        PID_SW -->|duty| MOT_SW
+    end
+
+    CTRL -->|update| WC
+    ADCL -->|"extAdcBuf[8]"| I2CR
+    I2CR -->|pending flag| LOOP
+    I2CS -->|"i2cReadBuf"| I2CR
+    ENCR -->|count| ENC_SW
+```
+
+### 通信シーケンス図
+
+```mermaid
+sequenceDiagram
+    participant Host as ホスト (PC / Raspberry Pi)
+    participant RP2040
+
+    Note over RP2040: 起動完了
+
+    Host->>RP2040: [0xAA][0x20][4][1,1,1,1][cs]<br/>CMD_SET_MODE_ALL: VELOCITY
+    RP2040-->>Host: [0xAA][0x80][1][0x20][cs]<br/>RESP_ACK
+
+    Host->>RP2040: [0xAA][0x22][16][f×4][cs]<br/>CMD_SET_VEL_ALL: 500 counts/sec
+    RP2040-->>Host: [0xAA][0x80][1][0x22][cs]<br/>RESP_ACK
+
+    loop 100Hz 自動送信
+        RP2040-->>Host: [0xAA][0x91][44][enc×4+vel×4+adc×4+ts][cs]<br/>RESP_STATUS
+    end
+
+    Host->>RP2040: [0xAA][0x02][0][cs]<br/>CMD_STOP_ALL
+    RP2040-->>Host: [0xAA][0x80][1][0x02][cs]<br/>RESP_ACK
+```
+
+### 制御モード 状態遷移図
+
+```mermaid
+stateDiagram-v2
+    [*] --> DIRECT : 起動時デフォルト
+
+    DIRECT --> VELOCITY : CMD_SET_MODE\n(mode=1)
+    DIRECT --> POSITION : CMD_SET_MODE\n(mode=2)
+    VELOCITY --> DIRECT : CMD_STOP_ALL\nCMD_BRAKE_ALL\nsetDuty()
+    VELOCITY --> POSITION : CMD_SET_MODE\n(mode=2)
+    POSITION --> DIRECT : CMD_STOP_ALL\nCMD_BRAKE_ALL\nsetDuty()
+    POSITION --> VELOCITY : CMD_SET_MODE\n(mode=1)
+
+    state DIRECT {
+        [*] --> coast : duty=0
+        coast --> running : setDuty(≠0)
+        running --> coast : setDuty(0)
+    }
+
+    state VELOCITY {
+        [*] --> pid_vel : setVelocityTarget()
+    }
+
+    state POSITION {
+        [*] --> outer_p : setPositionTarget()
+        outer_p --> deadband : |error| ≤ 5 counts
+        deadband --> outer_p : positionが変化
+    }
+```
+
+### 制御ループ タイミング図
+
+```mermaid
+gantt
+    title 制御ループ タイミング (1周期 = 1ms 単位)
+    dateFormat x
+    axisFormat %Lms
+
+    section 制御ループ (200Hz)
+    WheelCtrl update ×4 : 0, 1
+    WheelCtrl update ×4 : 5, 1
+    WheelCtrl update ×4 : 10, 1
+    WheelCtrl update ×4 : 15, 1
+    WheelCtrl update ×4 : 20, 1
+    WheelCtrl update ×4 : 25, 1
+
+    section 外部ADC (100Hz)
+    MCP3208 readAll : 0, 2
+    MCP3208 readAll : 10, 2
+    MCP3208 readAll : 20, 2
+
+    section ステータス送信 (100Hz)
+    sendStatus → USB : 0, 1
+    sendStatus → USB : 10, 1
+    sendStatus → USB : 20, 1
+```
+
+### センサ変換パラメータ
+
+| チャンネル | 物理量 | 変換式 | スケール |
+|---|---|---|---|
+| ch0-3 | モータ電流 [A] | count × Vref / (4096 × gain × Rshunt) | ~1.611 mA/count |
+| ch4 | バッテリ電圧 [V] | count × Vref × (R_upper+R_lower)/R_lower / 4096 | ~8.862 mV/count |
+
+- **Vref** = 3.3V、**ADCフルスケール** = 4096 counts (12bit)
+- **INA213**: gain=50 V/V、Rshunt=10 mΩ → 最大計測電流 6.6 A
+- **電圧分圧**: R_upper=100 kΩ / R_lower=10 kΩ → 分圧比 1/11 → 最大計測電圧 36.3 V
+
+### I2C 外部ADC・物理値レジスタ（追加）
+
+| レジスタ | アドレス | データ長 | 内容 |
+|---|---|---|---|
+| REG_EXT_ADC0 | 0x40 | 2 B | int16 MCP3208 ch0 raw (0..4095) |
+| REG_EXT_ADC1 | 0x41 | 2 B | int16 MCP3208 ch1 raw |
+| REG_EXT_ADC2 | 0x42 | 2 B | int16 MCP3208 ch2 raw |
+| REG_EXT_ADC3 | 0x43 | 2 B | int16 MCP3208 ch3 raw |
+| REG_EXT_ADC4 | 0x44 | 2 B | int16 MCP3208 ch4 raw |
+| REG_EXT_ADC_ALL | 0x48 | 16 B | int16 x8 全チャンネル一括 |
+| REG_CURR0 | 0x50 | 4 B | float Motor1電流 [A] |
+| REG_CURR1 | 0x51 | 4 B | float Motor2電流 [A] |
+| REG_CURR2 | 0x52 | 4 B | float Motor3電流 [A] |
+| REG_CURR3 | 0x53 | 4 B | float Motor4電流 [A] |
+| REG_VBATT | 0x54 | 4 B | float バッテリ電圧 [V] |
