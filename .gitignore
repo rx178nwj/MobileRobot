@@ -1,0 +1,18 @@
+# Claude Code session data
+.claude/
+
+# KiCad lock files (created when project is open)
+**/*.lck
+**/~*.kicad_sch.lck
+
+# KiCad generated / cache files
+fp-info-cache
+*.kicad_sch-bak
+*.kicad_pcb-bak
+
+# VSCode local settings (may contain personal paths)
+.vscode/settings.local.json
+
+# OS
+.DS_Store
+Thumbs.db
