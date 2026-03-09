@@ -21,10 +21,11 @@ void Encoder::begin(uint8_t index) {
     if (index >= MAX_ENCODERS) return;
     _instances[index] = this;
 
-    pinMode(_pinA, INPUT);
-    pinMode(_pinB, INPUT);
+    pinMode(_pinA, INPUT_PULLUP);
+    pinMode(_pinB, INPUT_PULLUP);
 
-    // Read initial state
+    // Read initial state after pull-ups settle
+    delayMicroseconds(10);
     _prevAB = ((digitalRead(_pinA) << 1) | digitalRead(_pinB)) & 0x03;
 
     // Attach ISR for both channels

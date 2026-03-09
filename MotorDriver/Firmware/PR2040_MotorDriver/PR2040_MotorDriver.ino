@@ -111,6 +111,8 @@
 
 #include <Wire.h>
 #include <SPI.h>
+#include <EEPROM.h>
+#include <MadgwickAHRS.h>
 #include "Config.h"
 #include "WheelController.h"
 #include "MCP3208.h"
@@ -157,13 +159,40 @@ static volatile bool i2cWritePending = false;
 static int16_t  extAdcBuf[8] = {0};  // MCP3208 ch0..7, last sampled values
 
 // ---------------------------------------------------------------------------
+// IMU — MPU-6881 direct Wire + Madgwick AHRS filter
+// ---------------------------------------------------------------------------
+static Madgwick  madgwick;
+static bool      imuOk        = false;
+static uint8_t   imuAddr      = MPU6881_I2C_ADDR;  // auto-detected address
+static float     imuAx = 0, imuAy = 0, imuAz = 0;  // [g]
+static float     imuGx = 0, imuGy = 0, imuGz = 0;  // [dps]
+static float     imuGyroBias[3]  = {0};  // gyro bias [dps]
+static float     imuAccelBias[3] = {0};  // accel bias [g] (gravity removed)
+
+// ---------------------------------------------------------------------------
+// IMU calibration flash persistence (EEPROM emulation)
+// ---------------------------------------------------------------------------
+struct ImuCalData {
+    uint32_t magic;        // must equal IMU_CAL_MAGIC to be valid
+    float    gyroBias[3];  // [dps]
+    float    accelBias[3]; // [g]
+};
+constexpr uint32_t IMU_CAL_MAGIC   = 0xCA1BEEF0UL;
+constexpr int      IMU_CAL_EEPROM_ADDR = 0;
+constexpr int      IMU_CAL_EEPROM_SIZE = 64;  // bytes reserved
+
+// ---------------------------------------------------------------------------
 // Timing
 // ---------------------------------------------------------------------------
 static uint32_t lastStatusMs   = 0;
 static uint32_t lastControlMs  = 0;
 static uint32_t lastExtAdcMs   = 0;
+static uint32_t lastImuMs      = 0;
+static uint32_t lastImuRetryMs = 0;
+static uint32_t lastLedMs      = 0;
 
-static constexpr uint32_t EXT_ADC_INTERVAL_MS = 10;  // 100 Hz
+static constexpr uint32_t EXT_ADC_INTERVAL_MS  = 10;    // 100 Hz
+static constexpr uint32_t IMU_RETRY_INTERVAL_MS = 2000; // retry init if not connected
 
 // ---------------------------------------------------------------------------
 // Forward declarations
@@ -175,6 +204,13 @@ static void     sendNak(uint8_t cmd);
 static uint8_t  calcChecksum(uint8_t cmd, uint8_t len, const uint8_t* data);
 static void     emergencyStop();
 static void     sendExtAdc();
+static void     setBodyVelocity(float linear_mmps, float omega_degps);
+static bool     initIMU();
+static void     readIMU();
+static void     sendIMU();
+static void     calibrateIMU();
+static void     saveCalibration();
+static bool     loadCalibration();
 static void     buildI2CReadBuffer(uint8_t reg);
 static void     processI2CWrite(const uint8_t* data, uint8_t len);
 static void     onI2CReceive(int numBytes);
@@ -196,6 +232,14 @@ void setup() {
         wheels[i].begin(i);
     }
 
+    // Status LEDs
+    pinMode(LED_RED_PIN,    OUTPUT);
+    pinMode(LED_GREEN_PIN,  OUTPUT);
+    pinMode(LED_YELLOW_PIN, OUTPUT);
+    digitalWrite(LED_RED_PIN,    LOW);
+    digitalWrite(LED_GREEN_PIN,  LOW);
+    digitalWrite(LED_YELLOW_PIN, LOW);
+
     // Internal ADC resolution: 12 bit
     analogReadResolution(12);
 
@@ -212,12 +256,21 @@ void setup() {
     Wire.setSDA(I2C0_SDA_PIN);
     Wire.setSCL(I2C0_SCL_PIN);
     Wire.begin();
+    Wire.setClock(400000);
 
-    // Brief IMU initialization (wake MPU-6881 from sleep)
-    Wire.beginTransmission(MPU6881_I2C_ADDR);
-    Wire.write(0x6B);  // PWR_MGMT_1
-    Wire.write(0x01);  // CLKSEL = PLL with X gyro
-    Wire.endTransmission();
+    // Load IMU calibration from flash (if previously saved)
+    EEPROM.begin(IMU_CAL_EEPROM_SIZE);
+    bool calLoaded = loadCalibration();
+
+    // MPU-6881 direct initialization
+    imuOk = initIMU();
+    if (imuOk) {
+        madgwick.begin(1000.0f / IMU_INTERVAL_MS);
+        readIMU();  // prime the filter
+    }
+    if (calLoaded) {
+        Serial.println("IMU calibration loaded from flash.");
+    }
 
     // I2C1 for controller communication (slave, GPIO2=SDA, GPIO3=SCL)
     Wire1.setSDA(I2C1_SDA_PIN);
@@ -256,6 +309,23 @@ void loop() {
     if (now - lastExtAdcMs >= EXT_ADC_INTERVAL_MS) {
         lastExtAdcMs = now;
         extAdc.readAll(extAdcBuf);
+    }
+
+    // --- IMU periodic sampling (IMU_INTERVAL_MS = 10 ms = 100 Hz) ---
+    if (now - lastImuMs >= IMU_INTERVAL_MS) {
+        lastImuMs = now;
+        readIMU();
+    }
+
+    // --- IMU auto-retry if not yet connected ---
+    if (!imuOk && (now - lastImuRetryMs >= IMU_RETRY_INTERVAL_MS)) {
+        lastImuRetryMs = now;
+        imuOk = initIMU();
+        if (imuOk) {
+            madgwick.begin(1000.0f / IMU_INTERVAL_MS);
+            readIMU();
+            Serial.println("IMU connected OK");
+        }
     }
 
     // --- Parse incoming serial bytes ---
@@ -326,6 +396,30 @@ void loop() {
         lastStatusMs = now;
         sendStatus();
     }
+
+    // --- Yellow LED heartbeat (500ms toggle = 1Hz blink) ---
+    if (now - lastLedMs >= 500) {
+        lastLedMs = now;
+        digitalWrite(LED_YELLOW_PIN, !digitalRead(LED_YELLOW_PIN));
+    }
+
+    // --- Green LED: ON while any motor driver is supplying current ---
+    // Active when: VELOCITY/POSITION mode (PID running), or DIRECT with wheel spinning
+    {
+        bool anyActive = false;
+        for (int i = 0; i < 4; i++) {
+            ControlMode m = wheels[i].getMode();
+            if (m == ControlMode::VELOCITY || m == ControlMode::POSITION) {
+                anyActive = true;
+                break;
+            }
+            if (abs(wheels[i].getVelocityInt()) > 20) {
+                anyActive = true;
+                break;
+            }
+        }
+        digitalWrite(LED_GREEN_PIN, anyActive ? HIGH : LOW);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -385,6 +479,37 @@ static void processPacket(uint8_t cmd, const uint8_t* data, uint8_t len) {
 
     case CMD_REQUEST_EXT_ADC: {
         sendExtAdc();
+        break;
+    }
+
+    // --- Body (differential drive) velocity control ---
+
+    case CMD_SET_BODY_VEL: {
+        if (len != 8) { sendNak(cmd); return; }
+        float linear_mmps, omega_degps;
+        memcpy(&linear_mmps, &data[0], 4);
+        memcpy(&omega_degps, &data[4], 4);
+        setBodyVelocity(linear_mmps, omega_degps);
+        sendAck(cmd);
+        break;
+    }
+
+    case CMD_BODY_STOP: {
+        wheels[BODY_LEFT_IDX].stop();
+        wheels[BODY_RIGHT_IDX].stop();
+        sendAck(cmd);
+        break;
+    }
+
+    case CMD_REQUEST_IMU: {
+        if (!imuOk) { sendNak(cmd); return; }
+        sendIMU();
+        break;
+    }
+
+    case CMD_CALIBRATE_IMU: {
+        calibrateIMU();  // blocking ~5s — keep IMU level and still
+        sendAck(cmd);
         break;
     }
 
@@ -577,6 +702,29 @@ static void emergencyStop() {
 }
 
 // ---------------------------------------------------------------------------
+// setBodyVelocity
+// Differential drive kinematics.
+//   V_L [mm/s] = linear - ω_rad × (WHEEL_BASE_MM / 2)
+//   V_R [mm/s] = linear + ω_rad × (WHEEL_BASE_MM / 2)
+// BODY_LEFT/RIGHT_DIR: +1 or -1 to match physical motor mounting orientation.
+// Automatically sets both drive wheels to VELOCITY mode.
+// ---------------------------------------------------------------------------
+static void setBodyVelocity(float linear_mmps, float omega_degps) {
+    const float omega_radps = omega_degps * (3.14159265f / 180.0f);
+    const float half_base   = WHEEL_BASE_MM * 0.5f;
+
+    float v_left_mmps  = linear_mmps - omega_radps * half_base;
+    float v_right_mmps = linear_mmps + omega_radps * half_base;
+
+    // Convert mm/s → counts/s and apply mounting direction
+    float cps_left  = BODY_LEFT_DIR  * v_left_mmps  / CPS_TO_MMPS;
+    float cps_right = BODY_RIGHT_DIR * v_right_mmps / CPS_TO_MMPS;
+
+    wheels[BODY_LEFT_IDX].setVelocityTarget(cps_left);
+    wheels[BODY_RIGHT_IDX].setVelocityTarget(cps_right);
+}
+
+// ---------------------------------------------------------------------------
 // sendExtAdc
 // Response data layout (16 bytes): int16 x8 MCP3208 ch0..7 (little-endian)
 // ---------------------------------------------------------------------------
@@ -592,6 +740,227 @@ static void sendExtAdc() {
     Serial.write(DATA_LEN);
     Serial.write(data, DATA_LEN);
     Serial.write(cksum);
+}
+
+// ---------------------------------------------------------------------------
+// initIMU
+// Direct Wire initialization of MPU-6881.
+// Returns true if WHO_AM_I passes and configuration succeeds.
+// ---------------------------------------------------------------------------
+static bool initIMU() {
+    // --- I2C bus scan: find IMU at 0x68 or 0x69 ---
+    bool found = false;
+    for (uint8_t addr : {(uint8_t)0x68, (uint8_t)0x69}) {
+        Wire.beginTransmission(addr);
+        uint8_t err = Wire.endTransmission();
+        Serial.print("I2C scan 0x");
+        Serial.print(addr, HEX);
+        Serial.print(": ");
+        Serial.println(err == 0 ? "ACK" : "NAK");
+        if (err == 0) { imuAddr = addr; found = true; break; }
+    }
+    if (!found) {
+        Serial.println("IMU: no device found on I2C bus (0x68, 0x69)");
+        return false;
+    }
+
+    // --- WHO_AM_I check (accept known MPU-60xx family values) ---
+    Wire.beginTransmission(imuAddr);
+    Wire.write(MPU_REG_WHO_AM_I);
+    if (Wire.endTransmission(false) != 0) return false;
+    Wire.requestFrom((int)imuAddr, 1);
+    if (!Wire.available()) return false;
+    uint8_t whoami = Wire.read();
+    Serial.print("IMU WHO_AM_I=0x"); Serial.println(whoami, HEX);
+    // Accept: 0x70=MPU-6500/6881, 0x19=MPU-6886, 0x71, 0x74=ICM-20689, 0x68, 0x69
+    const uint8_t known[] = {0x68, 0x69, 0x19, 0x70, 0x71, 0x74, 0x75};
+    bool ok = false;
+    for (uint8_t v : known) { if (whoami == v) { ok = true; break; } }
+    if (!ok) {
+        Serial.print("IMU WHO_AM_I=0x");
+        Serial.print(whoami, HEX);
+        Serial.println(" - unknown chip, attempting init anyway");
+        // Fall through: try to initialize anyway
+    }
+
+    auto wrReg = [](uint8_t reg, uint8_t val) {
+        Wire.beginTransmission(imuAddr);
+        Wire.write(reg);
+        Wire.write(val);
+        Wire.endTransmission();
+    };
+
+    // Reset
+    wrReg(MPU_REG_PWR_MGMT_1, 0x80);
+    delay(100);
+    // Wake up, PLL clock source
+    wrReg(MPU_REG_PWR_MGMT_1, 0x01);
+    delay(50);
+    // DLPF: bandwidth ~42 Hz (config=3)
+    wrReg(MPU_REG_CONFIG, 0x03);
+    // Sample rate = 1 kHz / (1 + SMPLRT_DIV)
+    //   SMPLRT_DIV=9 → 100 Hz (matches IMU_INTERVAL_MS=10)
+    wrReg(MPU_REG_SMPLRT_DIV, 9);
+    // Gyro full-scale: ±250°/s (bits[4:3]=00)
+    wrReg(MPU_REG_GYRO_CONFIG, 0x00);
+    // Accel full-scale: ±2g (bits[4:3]=00)
+    wrReg(MPU_REG_ACCEL_CONFIG, 0x00);
+    delay(10);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// readIMU
+// Called at IMU_INTERVAL_MS (100 Hz).
+// Reads 14 bytes (accel + temp + gyro) via Wire, applies bias, feeds Madgwick.
+// ---------------------------------------------------------------------------
+static void readIMU() {
+    if (!imuOk) return;
+
+    Wire.beginTransmission(imuAddr);
+    Wire.write(MPU_REG_ACCEL_XOUT_H);
+    if (Wire.endTransmission(false) != 0) return;
+    if (Wire.requestFrom((int)imuAddr, 14) < 14) return;
+
+    int16_t rawAx = (Wire.read() << 8) | Wire.read();
+    int16_t rawAy = (Wire.read() << 8) | Wire.read();
+    int16_t rawAz = (Wire.read() << 8) | Wire.read();
+    Wire.read(); Wire.read();  // skip temperature
+    int16_t rawGx = (Wire.read() << 8) | Wire.read();
+    int16_t rawGy = (Wire.read() << 8) | Wire.read();
+    int16_t rawGz = (Wire.read() << 8) | Wire.read();
+
+    // Convert: ±2g → 16384 LSB/g,  ±250°/s → 131 LSB/(°/s)
+    imuAx = rawAx * MPU_ACCEL_SCALE - imuAccelBias[0];
+    imuAy = rawAy * MPU_ACCEL_SCALE - imuAccelBias[1];
+    imuAz = rawAz * MPU_ACCEL_SCALE - imuAccelBias[2];
+    imuGx = rawGx * MPU_GYRO_SCALE  - imuGyroBias[0];
+    imuGy = rawGy * MPU_GYRO_SCALE  - imuGyroBias[1];
+    imuGz = rawGz * MPU_GYRO_SCALE  - imuGyroBias[2];
+
+    madgwick.updateIMU(imuGx, imuGy, imuGz, imuAx, imuAy, imuAz);
+}
+
+// ---------------------------------------------------------------------------
+// sendIMU
+// RESP_IMU data layout (IMU_DATA_LEN = 40 bytes):
+//   [0..11]  float x3  accel X,Y,Z  [g]
+//   [12..23] float x3  gyro  X,Y,Z  [dps]
+//   [24..27] float     roll   [°]
+//   [28..31] float     pitch  [°]
+//   [32..35] float     yaw    [°]
+//   [36..39] uint32    timestamp (ms)
+// ---------------------------------------------------------------------------
+static void sendIMU() {
+    uint8_t data[IMU_DATA_LEN];
+    uint8_t off = 0;
+
+    float ax = imuAx, ay = imuAy, az = imuAz;
+    float gx = imuGx, gy = imuGy, gz = imuGz;
+    float roll  = madgwick.getRoll();
+    float pitch = madgwick.getPitch();
+    float yaw   = madgwick.getYaw();
+
+    memcpy(&data[off], &ax, 4);    off += 4;
+    memcpy(&data[off], &ay, 4);    off += 4;
+    memcpy(&data[off], &az, 4);    off += 4;
+    memcpy(&data[off], &gx, 4);    off += 4;
+    memcpy(&data[off], &gy, 4);    off += 4;
+    memcpy(&data[off], &gz, 4);    off += 4;
+    memcpy(&data[off], &roll,  4); off += 4;
+    memcpy(&data[off], &pitch, 4); off += 4;
+    memcpy(&data[off], &yaw,   4); off += 4;
+    uint32_t ts = millis();
+    memcpy(&data[off], &ts, 4);    off += 4;
+
+    uint8_t cksum = calcChecksum(RESP_IMU, IMU_DATA_LEN, data);
+    Serial.write(PACKET_HEADER);
+    Serial.write(RESP_IMU);
+    Serial.write(IMU_DATA_LEN);
+    Serial.write(data, IMU_DATA_LEN);
+    Serial.write(cksum);
+}
+
+// ---------------------------------------------------------------------------
+// calibrateIMU
+// Blocking ~2s. Keep IMU level and perfectly still during calibration.
+// Collects 200 samples, computes gyro bias and accel offset (gravity removed).
+// ---------------------------------------------------------------------------
+static void calibrateIMU() {
+    if (!imuOk) return;
+    emergencyStop();
+
+    constexpr int N = 200;
+    double sumGx = 0, sumGy = 0, sumGz = 0;
+    double sumAx = 0, sumAy = 0, sumAz = 0;
+
+    for (int i = 0; i < N; i++) {
+        Wire.beginTransmission(imuAddr);
+        Wire.write(MPU_REG_ACCEL_XOUT_H);
+        Wire.endTransmission(false);
+        Wire.requestFrom((int)imuAddr, 14);
+        if (Wire.available() >= 14) {
+            int16_t ax = (Wire.read() << 8) | Wire.read();
+            int16_t ay = (Wire.read() << 8) | Wire.read();
+            int16_t az = (Wire.read() << 8) | Wire.read();
+            Wire.read(); Wire.read();  // skip temp
+            int16_t gx = (Wire.read() << 8) | Wire.read();
+            int16_t gy = (Wire.read() << 8) | Wire.read();
+            int16_t gz = (Wire.read() << 8) | Wire.read();
+            sumAx += ax * MPU_ACCEL_SCALE;
+            sumAy += ay * MPU_ACCEL_SCALE;
+            sumAz += az * MPU_ACCEL_SCALE;
+            sumGx += gx * MPU_GYRO_SCALE;
+            sumGy += gy * MPU_GYRO_SCALE;
+            sumGz += gz * MPU_GYRO_SCALE;
+        }
+        delay(10);  // 100 Hz
+    }
+
+    imuGyroBias[0] = (float)(sumGx / N);
+    imuGyroBias[1] = (float)(sumGy / N);
+    imuGyroBias[2] = (float)(sumGz / N);
+    // Accel bias: remove gravity from whichever axis is ~1g
+    float avgAx = (float)(sumAx / N);
+    float avgAy = (float)(sumAy / N);
+    float avgAz = (float)(sumAz / N);
+    imuAccelBias[0] = avgAx;
+    imuAccelBias[1] = avgAy;
+    // Z-axis: subtract gravity (1g or -1g depending on orientation)
+    imuAccelBias[2] = avgAz - (avgAz > 0 ? 1.0f : -1.0f);
+
+    madgwick.begin(1000.0f / IMU_INTERVAL_MS);  // reset filter
+    saveCalibration();
+    Serial.println("IMU calibration saved to flash.");
+}
+
+// ---------------------------------------------------------------------------
+// saveCalibration / loadCalibration
+// Persist imuGyroBias and imuAccelBias to RP2040 flash via EEPROM emulation.
+// ---------------------------------------------------------------------------
+static void saveCalibration() {
+    ImuCalData cal;
+    cal.magic = IMU_CAL_MAGIC;
+    memcpy(cal.gyroBias,  imuGyroBias,  sizeof(imuGyroBias));
+    memcpy(cal.accelBias, imuAccelBias, sizeof(imuAccelBias));
+    EEPROM.put(IMU_CAL_EEPROM_ADDR, cal);
+    EEPROM.commit();
+}
+
+static bool loadCalibration() {
+    ImuCalData cal;
+    EEPROM.get(IMU_CAL_EEPROM_ADDR, cal);
+    if (cal.magic != IMU_CAL_MAGIC) {
+        Serial.println("IMU: no saved calibration (first use or flash erased).");
+        return false;
+    }
+    memcpy(imuGyroBias,  cal.gyroBias,  sizeof(imuGyroBias));
+    memcpy(imuAccelBias, cal.accelBias, sizeof(imuAccelBias));
+    Serial.print("IMU cal loaded: gyroBias=[");
+    Serial.print(imuGyroBias[0], 4); Serial.print(", ");
+    Serial.print(imuGyroBias[1], 4); Serial.print(", ");
+    Serial.print(imuGyroBias[2], 4); Serial.println("] dps");
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -663,6 +1032,21 @@ static void buildI2CReadBuffer(uint8_t reg) {
         float vbatt = SensorConverter::toBatteryV(extAdcBuf[4]);
         memcpy(i2cReadBuf, &vbatt, 4);
         i2cReadLen = 4;
+
+    } else if (reg == REG_IMU) {
+        // IMU data: float x9 + uint32 = 40 B (same layout as RESP_IMU)
+        uint8_t off = 0;
+        float vals[9] = {
+            imuAx, imuAy, imuAz,
+            imuGx, imuGy, imuGz,
+            madgwick.getRoll(), madgwick.getPitch(), madgwick.getYaw()
+        };
+        for (int i = 0; i < 9; i++) {
+            memcpy(&i2cReadBuf[off], &vals[i], 4); off += 4;
+        }
+        uint32_t ts = millis();
+        memcpy(&i2cReadBuf[off], &ts, 4); off += 4;
+        i2cReadLen = off;  // 40
 
     } else if (reg == REG_DEVICE_ID) {
         i2cReadBuf[0] = 0x20;

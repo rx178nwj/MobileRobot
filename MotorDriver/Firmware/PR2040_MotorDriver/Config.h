@@ -32,8 +32,15 @@ constexpr uint8_t ENC4_B = 25;
 constexpr uint8_t ENC_A[4] = { ENC1_A, ENC2_A, ENC3_A, ENC4_A };
 constexpr uint8_t ENC_B[4] = { ENC1_B, ENC2_B, ENC3_B, ENC4_B };
 
+// --- Status LEDs -------------------------------------------------------------
+constexpr uint8_t LED_RED_PIN    = 29;  // RED    LED (GPIO29)
+constexpr uint8_t LED_GREEN_PIN  = 28;  // GREEN  LED (GPIO28)
+constexpr uint8_t LED_YELLOW_PIN = 27;  // YELLOW LED (GPIO27) — heartbeat
+
 // --- Internal ADC (RP2040 ADC0-3) --------------------------------------------
 // Connected to INA21x current sense amplifier outputs (via LPF)
+// Note: GPIO27-29 are shared with LEDs above; ADC reads will be affected
+// while LEDs are driven HIGH.
 constexpr uint8_t ADC_CURRENT_CH[4] = { 26, 27, 28, 29 };  // ADC0-3
 
 // --- I2C1: Controller communication (slave) ----------------------------------
@@ -90,11 +97,45 @@ constexpr uint8_t I2C0_SDA_PIN = 12;
 constexpr uint8_t I2C0_SCL_PIN = 13;
 constexpr uint8_t MPU6881_I2C_ADDR = 0x68;
 
+// MPU-6881 internal register addresses
+constexpr uint8_t MPU_REG_SMPLRT_DIV   = 0x19; // Sample rate divider
+constexpr uint8_t MPU_REG_CONFIG       = 0x1A; // DLPF config
+constexpr uint8_t MPU_REG_GYRO_CONFIG  = 0x1B; // Gyro full-scale
+constexpr uint8_t MPU_REG_ACCEL_CONFIG = 0x1C; // Accel full-scale
+constexpr uint8_t MPU_REG_ACCEL_XOUT_H = 0x3B; // Accel X high byte (14 bytes: accel+temp+gyro)
+constexpr uint8_t MPU_REG_PWR_MGMT_1   = 0x6B; // Power management
+constexpr uint8_t MPU_REG_WHO_AM_I     = 0x75; // Device ID (should return 0x70)
+
+// MPU-6881 sensitivity (at default full-scale)
+//   Accel: ±2g   → 16384 LSB/g
+//   Gyro:  ±250° → 131.0 LSB/(°/s)
+//   Temp:  T[°C] = raw / 340.0 + 36.53
+constexpr float MPU_ACCEL_SCALE = 1.0f / 16384.0f; // [g/count]
+constexpr float MPU_GYRO_SCALE  = 1.0f / 131.0f;   // [dps/count]
+
+// IMU sampling interval
+constexpr uint32_t IMU_INTERVAL_MS = 10; // 100 Hz
+
 // --- External SPI ADC: MCP3208/MAX11125 (SPI0) -------------------------------
 constexpr uint8_t SPI0_RX_PIN  = 4;   // MISO
 constexpr uint8_t SPI0_CSN_PIN = 5;   // Chip Select
 constexpr uint8_t SPI0_SCK_PIN = 6;   // Clock
 constexpr uint8_t SPI0_TX_PIN  = 7;   // MOSI
+
+// --- Differential Drive (2-wheel) Configuration ------------------------------
+// Motor index for each side (0-3 = M1-M4).
+// DIR: +1.0 = positive duty/CPS moves wheel forward,
+//      -1.0 = inverted (mirror-mounted motor)
+constexpr uint8_t BODY_LEFT_IDX  = 0;     // M1 = left wheel
+constexpr uint8_t BODY_RIGHT_IDX = 1;     // M2 = right wheel
+constexpr float   BODY_LEFT_DIR  =  1.0f; // flip sign if left wheel is reversed
+constexpr float   BODY_RIGHT_DIR = -1.0f; // flip sign if right wheel is reversed
+// Center-to-center distance between left and right wheel contact patches [mm]
+constexpr float   WHEEL_BASE_MM  = 191.5f;
+
+// Body velocity USB Serial commands
+constexpr uint8_t CMD_SET_BODY_VEL = 0x30; // float linear[mm/s] + float omega[deg/s] (8 B)
+constexpr uint8_t CMD_BODY_STOP    = 0x31; // no data — coast both drive wheels
 
 // --- Wheel Physical Parameters -----------------------------------------------
 // Wheel outer diameter [mm]
@@ -146,6 +187,8 @@ constexpr uint8_t CMD_SET_MOTOR_SINGLE = 0x04; // data: uint8 index, int16 duty
 constexpr uint8_t CMD_REQUEST_STATUS   = 0x10; // data: none
 constexpr uint8_t CMD_RESET_ENCODERS   = 0x11; // data: none
 constexpr uint8_t CMD_REQUEST_EXT_ADC  = 0x12; // data: none → RESP_EXT_ADC (16 B)
+constexpr uint8_t CMD_REQUEST_IMU      = 0x13; // data: none → RESP_IMU (40 B)
+constexpr uint8_t CMD_CALIBRATE_IMU    = 0x14; // data: none → blocks ~5s, then ACK
 // Wheel controller commands
 constexpr uint8_t CMD_SET_MODE_ALL     = 0x20; // data: uint8 x4  (0=DIRECT,1=VEL,2=POS)
 constexpr uint8_t CMD_SET_MODE_SINGLE  = 0x21; // data: uint8 index, uint8 mode
@@ -161,6 +204,19 @@ constexpr uint8_t RESP_ACK     = 0x80; // data: echo cmd byte
 constexpr uint8_t RESP_NAK     = 0x81; // data: echo cmd byte
 constexpr uint8_t RESP_STATUS  = 0x91; // see sendStatus() for layout
 constexpr uint8_t RESP_EXT_ADC = 0x92; // data: int16 x8 (16 B) MCP3208 ch0..7
+constexpr uint8_t RESP_IMU     = 0x93; // data: float x9 + uint32 (40 B)
+
+// IMU packet data length (40 bytes):
+//   [0..11]  float x3  accel X,Y,Z  [g]   (calibrated, FastIMU)
+//   [12..23] float x3  gyro  X,Y,Z  [dps] (calibrated, FastIMU)
+//   [24..27] float     roll   [°]   (Madgwick filter output)
+//   [28..31] float     pitch  [°]   (Madgwick filter output)
+//   [32..35] float     yaw    [°]   (Madgwick filter output)
+//   [36..39] uint32    timestamp (ms)
+constexpr uint8_t IMU_DATA_LEN = 40;
+
+// I2C register for IMU data
+constexpr uint8_t REG_IMU = 0x61;  // 18 B: same layout as RESP_IMU
 
 // Status packet data length (44 bytes):
 //   [0..15]  int32 x4  encoder counts
