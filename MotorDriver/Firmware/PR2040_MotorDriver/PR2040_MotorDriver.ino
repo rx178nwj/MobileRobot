@@ -169,6 +169,9 @@ static float     imuGx = 0, imuGy = 0, imuGz = 0;  // [dps]
 static float     imuGyroBias[3]  = {0};  // gyro bias [dps]
 static float     imuAccelBias[3] = {0};  // accel bias [g] (gravity removed)
 
+// Wheel calibration scale (applied to CPS_TO_MMPS at runtime)
+static float     wheelCalScale   = 1.0f;
+
 // ---------------------------------------------------------------------------
 // IMU calibration flash persistence (EEPROM emulation)
 // ---------------------------------------------------------------------------
@@ -177,9 +180,17 @@ struct ImuCalData {
     float    gyroBias[3];  // [dps]
     float    accelBias[3]; // [g]
 };
-constexpr uint32_t IMU_CAL_MAGIC   = 0xCA1BEEF0UL;
-constexpr int      IMU_CAL_EEPROM_ADDR = 0;
-constexpr int      IMU_CAL_EEPROM_SIZE = 64;  // bytes reserved
+constexpr uint32_t IMU_CAL_MAGIC       = 0xCA1BEEF0UL;
+constexpr int      IMU_CAL_EEPROM_ADDR = 0;   // ImuCalData starts here (28 bytes)
+
+// Wheel calibration scale (stored after IMU cal, aligned to 32)
+struct WheelCalData {
+    uint32_t magic;  // must equal WHEEL_CAL_MAGIC
+    float    scale;  // runtime multiplier for CPS_TO_MMPS (1.0 = no correction)
+};
+constexpr uint32_t WHEEL_CAL_MAGIC       = 0xCA1B10C0UL;
+constexpr int      WHEEL_CAL_EEPROM_ADDR = 32; // after ImuCalData
+constexpr int      IMU_CAL_EEPROM_SIZE   = 64; // total EEPROM bytes reserved
 
 // ---------------------------------------------------------------------------
 // Timing
@@ -211,6 +222,8 @@ static void     sendIMU();
 static void     calibrateIMU();
 static void     saveCalibration();
 static bool     loadCalibration();
+static void     saveWheelCal();
+static bool     loadWheelCal();
 static void     buildI2CReadBuffer(uint8_t reg);
 static void     processI2CWrite(const uint8_t* data, uint8_t len);
 static void     onI2CReceive(int numBytes);
@@ -270,6 +283,10 @@ void setup() {
     }
     if (calLoaded) {
         Serial.println("IMU calibration loaded from flash.");
+    }
+    if (loadWheelCal()) {
+        Serial.print("Wheel cal loaded: scale=");
+        Serial.println(wheelCalScale, 6);
     }
 
     // I2C1 for controller communication (slave, GPIO2=SDA, GPIO3=SCL)
@@ -501,6 +518,18 @@ static void processPacket(uint8_t cmd, const uint8_t* data, uint8_t len) {
         break;
     }
 
+    case CMD_SET_WHEEL_SCALE: {
+        if (len != 4) { sendNak(cmd); return; }
+        float scale;
+        memcpy(&scale, &data[0], 4);
+        if (scale < 0.5f || scale > 2.0f) { sendNak(cmd); return; }  // sanity check
+        wheelCalScale = scale;
+        saveWheelCal();
+        Serial.print("Wheel cal scale saved: "); Serial.println(scale, 6);
+        sendAck(cmd);
+        break;
+    }
+
     case CMD_REQUEST_IMU: {
         if (!imuOk) { sendNak(cmd); return; }
         sendIMU();
@@ -716,9 +745,10 @@ static void setBodyVelocity(float linear_mmps, float omega_degps) {
     float v_left_mmps  = linear_mmps - omega_radps * half_base;
     float v_right_mmps = linear_mmps + omega_radps * half_base;
 
-    // Convert mm/s → counts/s and apply mounting direction
-    float cps_left  = BODY_LEFT_DIR  * v_left_mmps  / CPS_TO_MMPS;
-    float cps_right = BODY_RIGHT_DIR * v_right_mmps / CPS_TO_MMPS;
+    // Convert mm/s → counts/s, apply mounting direction and wheel cal scale
+    const float effective_cps = CPS_TO_MMPS * wheelCalScale;
+    float cps_left  = BODY_LEFT_DIR  * v_left_mmps  / effective_cps;
+    float cps_right = BODY_RIGHT_DIR * v_right_mmps / effective_cps;
 
     wheels[BODY_LEFT_IDX].setVelocityTarget(cps_left);
     wheels[BODY_RIGHT_IDX].setVelocityTarget(cps_right);
@@ -960,6 +990,26 @@ static bool loadCalibration() {
     Serial.print(imuGyroBias[0], 4); Serial.print(", ");
     Serial.print(imuGyroBias[1], 4); Serial.print(", ");
     Serial.print(imuGyroBias[2], 4); Serial.println("] dps");
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// saveWheelCal / loadWheelCal
+// ---------------------------------------------------------------------------
+static void saveWheelCal() {
+    WheelCalData cal;
+    cal.magic = WHEEL_CAL_MAGIC;
+    cal.scale = wheelCalScale;
+    EEPROM.put(WHEEL_CAL_EEPROM_ADDR, cal);
+    EEPROM.commit();
+}
+
+static bool loadWheelCal() {
+    WheelCalData cal;
+    EEPROM.get(WHEEL_CAL_EEPROM_ADDR, cal);
+    if (cal.magic != WHEEL_CAL_MAGIC) return false;
+    if (cal.scale < 0.5f || cal.scale > 2.0f) return false;  // sanity check
+    wheelCalScale = cal.scale;
     return true;
 }
 

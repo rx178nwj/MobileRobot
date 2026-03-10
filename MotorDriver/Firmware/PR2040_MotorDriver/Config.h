@@ -128,14 +128,15 @@ constexpr uint8_t SPI0_TX_PIN  = 7;   // MOSI
 //      -1.0 = inverted (mirror-mounted motor)
 constexpr uint8_t BODY_LEFT_IDX  = 0;     // M1 = left wheel
 constexpr uint8_t BODY_RIGHT_IDX = 1;     // M2 = right wheel
-constexpr float   BODY_LEFT_DIR  =  1.0f; // flip sign if left wheel is reversed
-constexpr float   BODY_RIGHT_DIR = -1.0f; // flip sign if right wheel is reversed
+constexpr float   BODY_LEFT_DIR  = -1.0f; // flip sign if left wheel is reversed
+constexpr float   BODY_RIGHT_DIR =  1.0f; // flip sign if right wheel is reversed
 // Center-to-center distance between left and right wheel contact patches [mm]
 constexpr float   WHEEL_BASE_MM  = 191.5f;
 
 // Body velocity USB Serial commands
-constexpr uint8_t CMD_SET_BODY_VEL = 0x30; // float linear[mm/s] + float omega[deg/s] (8 B)
-constexpr uint8_t CMD_BODY_STOP    = 0x31; // no data — coast both drive wheels
+constexpr uint8_t CMD_SET_BODY_VEL    = 0x30; // float linear[mm/s] + float omega[deg/s] (8 B)
+constexpr uint8_t CMD_BODY_STOP       = 0x31; // no data — coast both drive wheels
+constexpr uint8_t CMD_SET_WHEEL_SCALE = 0x33; // float scale (4 B) — save wheel cal to flash
 
 // --- Wheel Physical Parameters -----------------------------------------------
 // Wheel outer diameter [mm]
@@ -152,8 +153,8 @@ constexpr float WHEEL_CIRCUMFERENCE_MM = 3.14159265f * WHEEL_DIAMETER_MM;  // �
 // Calibration: rotate wheel exactly 1 turn, read encoder count.
 // Set ENCODER_GEAR_RATIO = measured_count / (ENCODER_PPR * 4).
 constexpr float ENCODER_PPR        = 11.0f;   // pulses/motor-rev (1 channel)
-constexpr float ENCODER_GEAR_RATIO = 18.8f;   // gearbox reduction ratio
-constexpr float ENCODER_CPR        = ENCODER_PPR * 4.0f * ENCODER_GEAR_RATIO;  // ≈ 827.2
+constexpr float ENCODER_GEAR_RATIO = 51.45f;  // gearbox reduction ratio (JGA25-370 51:1)
+constexpr float ENCODER_CPR        = ENCODER_PPR * 4.0f * ENCODER_GEAR_RATIO;  // ≈ 2263.8
 
 // Conversion factors
 constexpr float CPS_TO_MMPS  = WHEEL_CIRCUMFERENCE_MM / ENCODER_CPR;  // (counts/sec) → (mm/sec)

@@ -35,6 +35,10 @@ Usage:
     imu               - Request and print IMU data (accel/gyro/roll/pitch/yaw)
     calibrate         - Calibrate IMU (keep board level & still, ~2s)
 
+--- Wheel calibration ---
+    wheelcal          - Auto-calibrate wheel params: spin 90°, compare IMU vs encoder,
+                        compute/save scale factor to flash (robot must be on flat surface)
+
 --- Other ---
     mon               - Start continuous monitor (Ctrl+C to stop)
     q / quit / exit   - Quit
@@ -75,6 +79,7 @@ CMD_SET_VEL_PID      = 0x26
 CMD_SET_POS_GAINS    = 0x27
 CMD_SET_BODY_VEL     = 0x30
 CMD_BODY_STOP        = 0x31
+CMD_SET_WHEEL_SCALE  = 0x33
 
 RESP_STATUS     = 0x91
 RESP_EXT_ADC    = 0x92
@@ -88,16 +93,16 @@ IMU_DATA_LEN    = 40  # float x9 + uint32
 WHEEL_DIAMETER_MM      = 67.5
 WHEEL_CIRCUMFERENCE_MM = 3.14159265 * WHEEL_DIAMETER_MM
 ENCODER_PPR            = 11.0
-ENCODER_GEAR_RATIO     = 18.8
+ENCODER_GEAR_RATIO     = 51.45  # JGA25-370 51:1 (measured via wheelcal)
 ENCODER_CPR            = ENCODER_PPR * 4.0 * ENCODER_GEAR_RATIO
 CPS_TO_MMPS            = WHEEL_CIRCUMFERENCE_MM / ENCODER_CPR
 
 # Differential drive configuration (must match Config.h)
-WHEEL_BASE_MM   = 205.0   # center-to-center wheel spacing [mm]
+WHEEL_BASE_MM   = 191.5   # center-to-center wheel spacing [mm]
 BODY_LEFT_IDX   = 0       # M1 = left wheel (0-based)
 BODY_RIGHT_IDX  = 1       # M2 = right wheel (0-based)
-BODY_LEFT_DIR   =  1.0    # +1 or -1: mounting direction of left wheel
-BODY_RIGHT_DIR  = -1.0    # +1 or -1: mounting direction of right wheel
+BODY_LEFT_DIR   = -1.0    # +1 or -1: mounting direction of left wheel
+BODY_RIGHT_DIR  =  1.0    # +1 or -1: mounting direction of right wheel
 
 # MCP3208 — INA213 current sense (ch0-3)
 #   REF pin: 3.3V divided by 20kΩ/10kΩ → V_ref = 1.1 V  (0A offset)
@@ -447,6 +452,9 @@ def handle_command(line, ser, reader):
             ser.write(make_packet(CMD_SET_POS_GAINS, data))
             print(f"[OK] Motor {idx+1} posKp={posKp} maxCps={maxCps}")
 
+        elif cmd == 'wheelcal':
+            do_wheel_cal(ser, reader)
+
         elif cmd == 'mon':
             continuous_monitor(ser, reader)
 
@@ -458,6 +466,123 @@ def handle_command(line, ser, reader):
         print(f"[Error] {e}")
 
     return True
+
+# --------------------------------------------------------------------------- #
+# Wheel calibration routine
+# --------------------------------------------------------------------------- #
+def _yaw_delta(start, end):
+    """Signed angle difference (deg), handles ±180 wrap-around."""
+    d = end - start
+    while d >  180.0: d -= 360.0
+    while d < -180.0: d += 360.0
+    return d
+
+def do_wheel_cal(ser, reader):
+    """
+    Spin 90° CCW in place using a slow angular rate.
+    Compare IMU yaw change vs encoder-derived yaw change to compute scale factor.
+    Send CMD_SET_WHEEL_SCALE to firmware and save to flash.
+    """
+    SPIN_DEGPS   = 40.0   # angular rate while spinning [deg/s]
+    STOP_AT_DEG  = 85.0   # stop early to account for deceleration
+    POLL_SEC     = 0.08   # IMU poll interval
+    TIMEOUT_SEC  = 10.0   # overall timeout
+
+    print("=== Wheel calibration ===")
+    print("Robot must be on a flat surface and free to rotate.")
+    print("Starting in 2 seconds… do not touch the robot.")
+    time.sleep(2.0)
+
+    # 1. Reset encoders; flush accumulated STATUS packets from buffer
+    ser.write(make_packet(CMD_RESET_ENCODERS))
+    time.sleep(0.2)
+    ser.reset_input_buffer()
+    reader.__init__()  # reset parser state
+    time.sleep(0.1)    # let USB CDC settle after flush
+
+    # 2. Get initial IMU yaw (retry up to 5 times)
+    resp = None
+    for _ in range(5):
+        resp = send_recv(ser, reader, make_packet(CMD_REQUEST_IMU), expected=RESP_IMU, timeout=1.0)
+        if resp:
+            break
+        ser.reset_input_buffer()
+        reader.__init__()
+        time.sleep(0.2)
+    if not resp:
+        print("[ERROR] Cannot read IMU. Is IMU connected?")
+        return
+    yaw_start = struct.unpack_from('<9f', resp[1], 0)[8]
+    print(f"  Initial yaw: {yaw_start:+.2f}°")
+
+    # 3. Start spinning CCW
+    spin_data = struct.pack('<ff', 0.0, SPIN_DEGPS)
+    ser.write(make_packet(CMD_SET_BODY_VEL, spin_data))
+
+    # 4. Poll IMU until yaw delta reaches STOP_AT_DEG or timeout
+    t0       = time.monotonic()
+    yaw_cur  = yaw_start
+    while time.monotonic() - t0 < TIMEOUT_SEC:
+        time.sleep(POLL_SEC)
+        resp = send_recv(ser, reader, make_packet(CMD_REQUEST_IMU), expected=RESP_IMU, timeout=0.5)
+        if resp:
+            yaw_cur = struct.unpack_from('<9f', resp[1], 0)[8]
+        if abs(_yaw_delta(yaw_start, yaw_cur)) >= STOP_AT_DEG:
+            break
+
+    # 5. Stop
+    ser.write(make_packet(CMD_BODY_STOP))
+    time.sleep(0.4)  # wait for deceleration
+    ser.reset_input_buffer()
+    reader.__init__()
+
+    # 6. Final readings
+    resp_imu = send_recv(ser, reader, make_packet(CMD_REQUEST_IMU), expected=RESP_IMU, timeout=1.5)
+    resp_enc = send_recv(ser, reader, make_packet(CMD_REQUEST_STATUS), expected=RESP_STATUS, timeout=1.5)
+
+    if not resp_imu or not resp_enc:
+        print("[ERROR] Failed to read final IMU or encoder data.")
+        return
+
+    yaw_end  = struct.unpack_from('<9f', resp_imu[1], 0)[8]
+    enc      = struct.unpack_from('<4i', resp_enc[1], 0)
+
+    yaw_imu_deg = _yaw_delta(yaw_start, yaw_end)
+
+    # 7. Encoder-based yaw estimate
+    #    forward_mm = counts * DIR * COUNTS_TO_MM
+    #    yaw_enc = (right_mm - left_mm) / WHEEL_BASE_MM  (rad) * (180/π)
+    enc_left_mm  = enc[BODY_LEFT_IDX]  * BODY_LEFT_DIR  * (WHEEL_CIRCUMFERENCE_MM / ENCODER_CPR)
+    enc_right_mm = enc[BODY_RIGHT_IDX] * BODY_RIGHT_DIR * (WHEEL_CIRCUMFERENCE_MM / ENCODER_CPR)
+    yaw_enc_deg  = (enc_right_mm - enc_left_mm) / WHEEL_BASE_MM * (180.0 / 3.14159265)
+
+    print(f"  Final yaw (IMU):      {yaw_end:+.2f}°")
+    print(f"  Yaw delta (IMU):      {yaw_imu_deg:+.2f}°")
+    print(f"  Yaw delta (encoder):  {yaw_enc_deg:+.2f}°")
+
+    if abs(yaw_enc_deg) < 5.0:
+        print("[ERROR] Encoder yaw too small — did the wheels move?")
+        return
+    if abs(yaw_imu_deg) < 5.0:
+        print("[ERROR] IMU yaw too small — did the robot actually rotate?")
+        return
+
+    scale = yaw_imu_deg / yaw_enc_deg
+
+    eff_diameter = WHEEL_DIAMETER_MM * scale
+    eff_ratio    = ENCODER_GEAR_RATIO / scale
+
+    print(f"\n  Scale factor:         {scale:.6f}")
+    print(f"  Effective wheel dia:  {eff_diameter:.2f} mm  (config: {WHEEL_DIAMETER_MM} mm)")
+    print(f"  Effective gear ratio: {eff_ratio:.4f}  (config: {ENCODER_GEAR_RATIO})")
+
+    # 8. Send scale to firmware
+    resp = send_recv(ser, reader, make_packet(CMD_SET_WHEEL_SCALE, struct.pack('<f', scale)),
+                     expected=RESP_ACK, timeout=2.0)
+    if resp:
+        print(f"\n[OK] Scale {scale:.6f} saved to flash.")
+    else:
+        print("[ERROR] Firmware did not acknowledge wheel scale command.")
 
 # --------------------------------------------------------------------------- #
 # Continuous monitor mode
