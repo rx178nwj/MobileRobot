@@ -188,7 +188,7 @@ struct WheelCalData {
     uint32_t magic;  // must equal WHEEL_CAL_MAGIC
     float    scale;  // runtime multiplier for CPS_TO_MMPS (1.0 = no correction)
 };
-constexpr uint32_t WHEEL_CAL_MAGIC       = 0xCA1B10C0UL;
+constexpr uint32_t WHEEL_CAL_MAGIC       = 0xCA1B10C1UL;  // bumped: gear ratio updated to 54.78
 constexpr int      WHEEL_CAL_EEPROM_ADDR = 32; // after ImuCalData
 constexpr int      IMU_CAL_EEPROM_SIZE   = 64; // total EEPROM bytes reserved
 

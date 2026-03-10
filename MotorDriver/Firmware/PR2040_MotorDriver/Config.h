@@ -153,8 +153,8 @@ constexpr float WHEEL_CIRCUMFERENCE_MM = 3.14159265f * WHEEL_DIAMETER_MM;  // �
 // Calibration: rotate wheel exactly 1 turn, read encoder count.
 // Set ENCODER_GEAR_RATIO = measured_count / (ENCODER_PPR * 4).
 constexpr float ENCODER_PPR        = 11.0f;   // pulses/motor-rev (1 channel)
-constexpr float ENCODER_GEAR_RATIO = 51.45f;  // gearbox reduction ratio (JGA25-370 51:1)
-constexpr float ENCODER_CPR        = ENCODER_PPR * 4.0f * ENCODER_GEAR_RATIO;  // ≈ 2263.8
+constexpr float ENCODER_GEAR_RATIO = 54.78f;  // gearbox reduction ratio (measured via wheelcal: 51.45/0.939244)
+constexpr float ENCODER_CPR        = ENCODER_PPR * 4.0f * ENCODER_GEAR_RATIO;  // ≈ 2410.3
 
 // Conversion factors
 constexpr float CPS_TO_MMPS  = WHEEL_CIRCUMFERENCE_MM / ENCODER_CPR;  // (counts/sec) → (mm/sec)
