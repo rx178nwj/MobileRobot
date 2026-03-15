@@ -1,0 +1,13 @@
+# Python dependencies for edge services
+
+# I2C Communication
+smbus2>=0.4.0
+
+# WebSocket server
+websockets>=10.0
+
+# Camera and image processing
+opencv-python>=4.5.0
+
+# Utilities
+numpy>=1.20.0

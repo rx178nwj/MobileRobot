@@ -16,3 +16,33 @@ fp-info-cache
 # OS
 .DS_Store
 Thumbs.db
+
+# Arduino build artifacts
+**/build/
+*.elf
+*.hex
+*.bin
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+ENV/
+
+# ROS 2
+install/
+log/
+build/
+
+# Edge services logs
+edge_services/logs/
+
+# Docker workspace
+ros2_docker/ros2_workspace/

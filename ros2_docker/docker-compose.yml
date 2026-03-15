@@ -1,0 +1,20 @@
+services:
+  ros2:
+    build: .
+    image: mobile-robot-ros2:jazzy
+    container_name: mobile_robot_ros2
+    privileged: true
+    network_mode: host
+    devices:
+      - /dev/i2c-1:/dev/i2c-1
+      - /dev/video0:/dev/video0
+    volumes:
+      - ../mobile_robot_edge:/ros2_ws/src/mobile_robot_edge
+      - ../edge_services:/edge_services
+      - ./ros2_workspace:/ros2_ws
+    environment:
+      - DISPLAY=${DISPLAY}
+      - ROS_DOMAIN_ID=0
+    stdin_open: true
+    tty: true
+    command: /bin/bash
