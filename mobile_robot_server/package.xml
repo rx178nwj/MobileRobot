@@ -1,27 +1,42 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>mobile_robot_edge</name>
+  <name>mobile_robot_server</name>
   <version>0.1.0</version>
   <description>
-    Edge-side ROS 2 package for mobile robot (Raspberry Pi):
-    sensor acquisition, motor control via WebSocket to edge_services,
-    and camera bridge (CompressedImage publisher).
+    Ubuntu server-side ROS 2 package for mobile robot:
+    Visual SLAM (RTAB-Map), Navigation (Nav2), and LLM-based autonomous control.
+    Receives sensor data from Raspberry Pi edge via rmw_zenoh_cpp.
   </description>
   <maintainer email="rx178.nwj@gmail.com">rx178nwj</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_python</buildtool_depend>
 
+  <!-- Core ROS 2 -->
   <depend>rclpy</depend>
+  <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>tf2_ros</depend>
-  <depend>std_msgs</depend>
+
+  <!-- Image transport (decompression) -->
   <depend>image_transport</depend>
   <depend>image_transport_plugins</depend>
   <depend>compressed_image_transport</depend>
+  <depend>cv_bridge</depend>
+
+  <!-- Visual SLAM -->
+  <depend>rtabmap_slam</depend>
+  <depend>rtabmap_odom</depend>
+  <depend>rtabmap_util</depend>
+
+  <!-- Navigation -->
+  <depend>nav2_bringup</depend>
+  <depend>nav2_msgs</depend>
+
+  <!-- Robot description -->
   <depend>robot_state_publisher</depend>
 
   <test_depend>ament_copyright</test_depend>

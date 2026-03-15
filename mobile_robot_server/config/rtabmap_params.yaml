@@ -1,0 +1,72 @@
+# =============================================================================
+# RTAB-Map parameters — Monocular Camera + Wheel Odometry (RGB + Odometry mode)
+# =============================================================================
+#
+# 構成: 単眼カメラ(RGB) + ホイールオドメトリ のフュージョンSLAM
+#
+# スケール情報の取得について:
+#   単眼カメラ単体ではスケールが不定だが、車輪オドメトリ(/odom)を
+#   モーションプライアとして使用することで正確なスケールを回復する。
+#
+# データフロー:
+#   /camera/image_raw  ─┐
+#   /camera/camera_info │  →  rtabmap  →  /map  +  TF(map→odom)
+#   /odom              ─┘
+# =============================================================================
+
+rtabmap:
+  ros__parameters:
+
+    # ---- フレームID ----
+    frame_id:       base_footprint   # ロボットのベースフレーム
+    odom_frame_id:  odom
+    map_frame_id:   map
+
+    # ---- 購読モード設定 (重要: 単眼モード) ----
+    subscribe_depth:  false   # ← 深度カメラなし → false必須
+    subscribe_rgb:    true    # ← 単眼カメラ使用
+    subscribe_stereo: false
+    subscribe_scan:   false
+    subscribe_scan_cloud: false
+    subscribe_odom:   true    # ← ホイールオドメトリを使用
+
+    # ---- キーフレーム生成の閾値 ----
+    # ロボットがこの距離/角度以上移動したときのみ新しいノード(キーフレーム)を作成
+    # 小さすぎると計算負荷増大、大きすぎるとマップが荒くなる
+    RGBD/LinearUpdate:  "0.10"   # 10cm移動ごと
+    RGBD/AngularUpdate: "0.087"  # ~5度回転ごと
+
+    # ---- 2Dロボット制約 (平面移動) ----
+    # 差動2輪ロボットはZ方向移動・ピッチ・ロールなし → 計算を2Dに限定
+    Reg/Force3DoF: "true"
+
+    # ---- ビジュアル特徴マッチング ----
+    # 単眼でのループ閉じ込み検出に使用するパラメータ
+    Kp/MaxFeatures:     "500"    # 抽出する特徴点数(上げると精度↑、CPU↑)
+    Vis/MinInliers:     "15"     # ループ閉じ込みに必要な最小インライア数
+                                 # 単眼では少なめに設定(10〜20が目安)
+    Vis/EstimationType: "1"      # 0=3D→3D(要depth), 1=3D→2D(PnP), 2=Homography
+                                 # 単眼+オドメトリ: 1 を使用
+    Vis/MaxDepth:       "0.0"    # 0=深度フィルタ無効 (単眼では必須)
+
+    # ---- グラフ最適化 ----
+    Optimizer/Strategy:         "1"      # 0=TORO, 1=g2o, 2=GTSAM
+    RGBD/OptimizeFromGraphEnd:  "false"  # 最新ノードから最適化 → レイテンシ削減
+
+    # ---- メモリ管理 ----
+    Mem/STMSize:            "30"     # Short-term memory サイズ
+    Mem/IncrementalMemory:  "true"   # オンライン(逐次)マッピングモード
+    Mem/ReduceGraph:        "false"  # グラフ間引き無効(精度優先)
+
+    # ---- 2D占有グリッドマップ生成 ----
+    # 深度カメラなしのため、視覚特徴を地表面に投影してマップを作成
+    Grid/FromDepth:    "false"   # ← 単眼必須: depthなしでグリッド生成
+    Grid/CellSize:     "0.05"   # 5cm解像度
+    Grid/RangeMax:     "4.0"    # 最大マッピング距離(m)
+    Grid/RayTracing:   "true"   # レイトレーシングで空き空間を推定
+
+    # ---- 更新レート ----
+    Rtabmap/DetectionRate: "1"  # ループ閉じ込み検出頻度(Hz) — CPUに応じて調整
+
+    # ---- マッチング戦略 ----
+    Reg/Strategy: "0"  # 0=Visual, 1=ICP, 2=Visual+ICP → 単眼は0

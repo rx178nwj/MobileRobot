@@ -2,7 +2,7 @@ from setuptools import setup
 import os
 from glob import glob
 
-package_name = 'mobile_robot_edge'
+package_name = 'mobile_robot_server'
 
 setup(
     name=package_name,
@@ -13,22 +13,18 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
+        (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='rx178nwj',
     maintainer_email='rx178.nwj@gmail.com',
-    description='Edge-side ROS 2 package for mobile robot (Raspberry Pi): '
-                'sensor acquisition, motor control, camera bridge.',
+    description='Ubuntu server-side: Visual SLAM, Nav2, LLM navigation controller',
     license='MIT',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'odometry_publisher    = mobile_robot_edge.odometry_publisher:main',
-            'motor_controller      = mobile_robot_edge.motor_controller:main',
-            'ws_odometry_publisher = mobile_robot_edge.ws_odometry_publisher:main',
-            'ws_motor_controller   = mobile_robot_edge.ws_motor_controller:main',
-            'ws_camera_bridge      = mobile_robot_edge.ws_camera_bridge:main',
+            'llm_nav_controller = mobile_robot_server.llm_nav_controller:main',
         ],
     },
 )
