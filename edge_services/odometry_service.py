@@ -5,7 +5,7 @@ Odometry Service
 Reads wheel encoders and publishes odometry data via WebSocket.
 
 Features:
-- Encoder reading from PR2040 motor driver
+- Encoder reading from PR2040 motor driver via USB Serial
 - Odometry calculation (position, velocity)
 - WebSocket broadcaster
 - Differential drive kinematics
@@ -37,7 +37,7 @@ import logging
 import math
 import time
 from typing import Set
-from hardware.pr2040_driver import PR2040Driver
+from hardware.pr2040_usb_driver import PR2040USBDriver
 
 
 class OdometryService:
@@ -77,8 +77,9 @@ class OdometryService:
         # Connected clients
         self.clients: Set[websockets.WebSocketServerProtocol] = set()
 
-        # Hardware
-        self.driver = PR2040Driver()
+        # Hardware - USB Serial connection
+        usb_port = config.get('usb_port', '/dev/ttyACM0')
+        self.driver = PR2040USBDriver(port=usb_port)
 
         self.logger.info("Odometry Service initialized")
         self.logger.info(f"Wheel base: {self.wheel_base}m, radius: {self.wheel_radius}m")
@@ -244,7 +245,7 @@ class OdometryService:
                         await websocket.send(json.dumps({'type': 'ack', 'reset': True}))
 
                     elif data.get('type') == 'get_status':
-                        status = self.driver.read_status()
+                        status = self.driver.get_status()
                         await websocket.send(json.dumps({'type': 'status', 'data': status}))
 
                 except json.JSONDecodeError as e:
@@ -288,10 +289,11 @@ async def main():
     config = {
         'wheel_base': 0.16,      # meters
         'wheel_radius': 0.033,   # meters
-        'encoder_cpr': 720,      # counts per revolution
+        'encoder_cpr': 827.2,    # counts per revolution (calibrated)
         'publish_rate': 50.0,    # Hz
         'host': '0.0.0.0',
-        'port': 8002
+        'port': 8002,
+        'usb_port': '/dev/ttyACM0'  # USB serial port
     }
 
     # Create and run service

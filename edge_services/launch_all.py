@@ -98,6 +98,7 @@ class EdgeServiceLauncher:
         """Create motor service configuration"""
         robot = self.config['robot']
         motor = self.config['motor_service']
+        hardware = self.config['hardware']
 
         return {
             'wheel_base': robot['wheel_base'],
@@ -107,13 +108,15 @@ class EdgeServiceLauncher:
             'max_angular_velocity': robot['max_angular_velocity'],
             'cmd_vel_timeout': motor['cmd_vel_timeout'],
             'host': motor['host'],
-            'port': motor['port']
+            'port': motor['port'],
+            'usb_port': motor.get('usb_port', hardware.get('usb_port', '/dev/ttyACM0'))
         }
 
     def _create_odometry_config(self) -> dict:
         """Create odometry service configuration"""
         robot = self.config['robot']
         odom = self.config['odometry_service']
+        hardware = self.config['hardware']
 
         return {
             'wheel_base': robot['wheel_base'],
@@ -121,7 +124,8 @@ class EdgeServiceLauncher:
             'encoder_cpr': robot['encoder_cpr'],
             'publish_rate': odom['publish_rate'],
             'host': odom['host'],
-            'port': odom['port']
+            'port': odom['port'],
+            'usb_port': odom.get('usb_port', hardware.get('usb_port', '/dev/ttyACM0'))
         }
 
     def _create_camera_config(self) -> dict:

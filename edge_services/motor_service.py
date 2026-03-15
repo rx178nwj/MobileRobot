@@ -2,7 +2,7 @@
 """
 Motor Control Service
 
-Receives velocity commands via WebSocket and controls motors via I2C.
+Receives velocity commands via WebSocket and controls motors via USB Serial.
 
 Features:
 - WebSocket server for velocity commands
@@ -28,7 +28,7 @@ import logging
 import math
 import time
 from typing import Optional
-from hardware.pr2040_driver import PR2040Driver
+from hardware.pr2040_usb_driver import PR2040USBDriver
 
 
 class MotorControlService:
@@ -61,8 +61,9 @@ class MotorControlService:
         self.current_linear = 0.0
         self.current_angular = 0.0
 
-        # Hardware
-        self.driver = PR2040Driver()
+        # Hardware - USB Serial connection
+        usb_port = config.get('usb_port', '/dev/ttyACM0')
+        self.driver = PR2040USBDriver(port=usb_port)
 
         self.logger.info(f"Motor Control Service initialized")
         self.logger.info(f"Wheel base: {self.wheel_base}m, radius: {self.wheel_radius}m")
@@ -241,12 +242,13 @@ async def main():
     config = {
         'wheel_base': 0.16,              # meters
         'wheel_radius': 0.033,           # meters
-        'encoder_cpr': 720,              # counts per revolution
+        'encoder_cpr': 827.2,            # counts per revolution (calibrated)
         'max_linear_velocity': 0.5,      # m/s
         'max_angular_velocity': 2.0,     # rad/s
         'cmd_vel_timeout': 0.5,          # seconds
         'host': '0.0.0.0',
-        'port': 8001
+        'port': 8001,
+        'usb_port': '/dev/ttyACM0'       # USB serial port
     }
 
     # Create and run service

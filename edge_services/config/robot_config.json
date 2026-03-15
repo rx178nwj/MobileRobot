@@ -3,7 +3,7 @@
     "name": "mobile_robot",
     "wheel_base": 0.16,
     "wheel_radius": 0.033,
-    "encoder_cpr": 720,
+    "encoder_cpr": 827.2,
     "max_linear_velocity": 0.5,
     "max_angular_velocity": 2.0
   },
@@ -11,13 +11,15 @@
     "enabled": true,
     "host": "0.0.0.0",
     "port": 8001,
-    "cmd_vel_timeout": 0.5
+    "cmd_vel_timeout": 0.5,
+    "usb_port": "/dev/ttyACM0"
   },
   "odometry_service": {
     "enabled": true,
     "host": "0.0.0.0",
     "port": 8002,
-    "publish_rate": 50.0
+    "publish_rate": 50.0,
+    "usb_port": "/dev/ttyACM0"
   },
   "camera_service": {
     "enabled": true,
@@ -31,8 +33,8 @@
     "focus_value": 450
   },
   "hardware": {
-    "i2c_bus": 1,
-    "i2c_address": 96
+    "usb_port": "/dev/ttyACM0",
+    "baudrate": 115200
   },
   "logging": {
     "level": "INFO",
