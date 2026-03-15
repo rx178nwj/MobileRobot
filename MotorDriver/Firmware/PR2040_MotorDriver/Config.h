@@ -89,6 +89,7 @@ constexpr uint8_t REG_ENC0            = 0x10;  // 0x10-0x13
 constexpr uint8_t REG_VEL0            = 0x14;  // 0x14-0x17
 constexpr uint8_t REG_ADC0            = 0x20;  // 0x20-0x23
 constexpr uint8_t REG_STATUS          = 0x30;
+constexpr uint8_t REG_BOARD_TEMP      = 0x60;  // Board temperature (float, °C)
 constexpr uint8_t REG_DEVICE_ID       = 0xFF;
 
 // --- IMU: MPU-6881 (I2C0) ----------------------------------------------------
@@ -190,6 +191,7 @@ constexpr uint8_t CMD_RESET_ENCODERS   = 0x11; // data: none
 constexpr uint8_t CMD_REQUEST_EXT_ADC  = 0x12; // data: none → RESP_EXT_ADC (16 B)
 constexpr uint8_t CMD_REQUEST_IMU      = 0x13; // data: none → RESP_IMU (40 B)
 constexpr uint8_t CMD_CALIBRATE_IMU    = 0x14; // data: none → blocks ~5s, then ACK
+constexpr uint8_t CMD_REQUEST_TEMP     = 0x15; // data: none → RESP_TEMP (4 B)
 // Wheel controller commands
 constexpr uint8_t CMD_SET_MODE_ALL     = 0x20; // data: uint8 x4  (0=DIRECT,1=VEL,2=POS)
 constexpr uint8_t CMD_SET_MODE_SINGLE  = 0x21; // data: uint8 index, uint8 mode
@@ -206,6 +208,7 @@ constexpr uint8_t RESP_NAK     = 0x81; // data: echo cmd byte
 constexpr uint8_t RESP_STATUS  = 0x91; // see sendStatus() for layout
 constexpr uint8_t RESP_EXT_ADC = 0x92; // data: int16 x8 (16 B) MCP3208 ch0..7
 constexpr uint8_t RESP_IMU     = 0x93; // data: float x9 + uint32 (40 B)
+constexpr uint8_t RESP_TEMP    = 0x94; // data: float (4 B) board temperature [°C]
 
 // IMU packet data length (40 bytes):
 //   [0..11]  float x3  accel X,Y,Z  [g]   (calibrated, FastIMU)

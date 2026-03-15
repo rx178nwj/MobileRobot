@@ -117,11 +117,13 @@
 #include "WheelController.h"
 #include "MCP3208.h"
 #include "SensorConverter.h"
+#include "S5851A.h"
 
 // ---------------------------------------------------------------------------
 // Instances
 // ---------------------------------------------------------------------------
 static MCP3208 extAdc(SPI0_CSN_PIN, SPI);
+static S5851A  tempSensor(Wire, S5851A::I2C_ADDR);  // Board temperature sensor
 
 static WheelController wheels[4] = {
     WheelController(MOTOR1_IN1, MOTOR1_IN2, ENC1_A, ENC1_B),
@@ -168,6 +170,13 @@ static float     imuAx = 0, imuAy = 0, imuAz = 0;  // [g]
 static float     imuGx = 0, imuGy = 0, imuGz = 0;  // [dps]
 static float     imuGyroBias[3]  = {0};  // gyro bias [dps]
 static float     imuAccelBias[3] = {0};  // accel bias [g] (gravity removed)
+
+// ---------------------------------------------------------------------------
+// S-5851A Board Temperature Sensor
+// ---------------------------------------------------------------------------
+static bool      tempSensorOk   = false;
+static float     boardTemp      = NAN;  // °C
+static uint32_t  lastTempMs     = 0;
 
 // Wheel calibration scale (applied to CPS_TO_MMPS at runtime)
 static float     wheelCalScale   = 1.0f;
@@ -289,6 +298,14 @@ void setup() {
         Serial.println(wheelCalScale, 6);
     }
 
+    // S-5851A Board Temperature Sensor (shares I2C0 with IMU)
+    tempSensorOk = tempSensor.begin();
+    if (tempSensorOk) {
+        Serial.println("S-5851A temperature sensor initialized.");
+    } else {
+        Serial.println("Warning: S-5851A not found.");
+    }
+
     // I2C1 for controller communication (slave, GPIO2=SDA, GPIO3=SCL)
     Wire1.setSDA(I2C1_SDA_PIN);
     Wire1.setSCL(I2C1_SCL_PIN);
@@ -300,9 +317,15 @@ void setup() {
     lastControlMs = now;
     lastStatusMs  = now;
     lastExtAdcMs  = now;
+    lastTempMs    = now;
 
     // Initial ADC sample so buffer is valid immediately
     extAdc.readAll(extAdcBuf);
+
+    // Initial temperature reading
+    if (tempSensorOk) {
+        boardTemp = tempSensor.readTemperature();
+    }
 
     Serial.println("PR2040_MotorDriver Ready");
 }
@@ -342,6 +365,14 @@ void loop() {
             madgwick.begin(1000.0f / IMU_INTERVAL_MS);
             readIMU();
             Serial.println("IMU connected OK");
+        }
+    }
+
+    // --- Temperature sensor periodic sampling (1 Hz = 1000 ms) ---
+    if (now - lastTempMs >= 1000) {
+        lastTempMs = now;
+        if (tempSensorOk) {
+            boardTemp = tempSensor.readTemperature();
         }
     }
 
@@ -539,6 +570,11 @@ static void processPacket(uint8_t cmd, const uint8_t* data, uint8_t len) {
     case CMD_CALIBRATE_IMU: {
         calibrateIMU();  // blocking ~5s — keep IMU level and still
         sendAck(cmd);
+        break;
+    }
+
+    case CMD_REQUEST_TEMP: {
+        sendTemperature();
         break;
     }
 
@@ -912,6 +948,23 @@ static void sendIMU() {
 }
 
 // ---------------------------------------------------------------------------
+// sendTemperature
+// RESP_TEMP data layout (4 bytes):
+//   [0..3]  float  board temperature [°C]
+// ---------------------------------------------------------------------------
+static void sendTemperature() {
+    uint8_t data[4];
+    memcpy(data, &boardTemp, 4);
+
+    uint8_t cksum = calcChecksum(RESP_TEMP, 4, data);
+    Serial.write(PACKET_HEADER);
+    Serial.write(RESP_TEMP);
+    Serial.write(4);
+    Serial.write(data, 4);
+    Serial.write(cksum);
+}
+
+// ---------------------------------------------------------------------------
 // calibrateIMU
 // Blocking ~2s. Keep IMU level and perfectly still during calibration.
 // Collects 200 samples, computes gyro bias and accel offset (gravity removed).
@@ -1097,6 +1150,11 @@ static void buildI2CReadBuffer(uint8_t reg) {
         uint32_t ts = millis();
         memcpy(&i2cReadBuf[off], &ts, 4); off += 4;
         i2cReadLen = off;  // 40
+
+    } else if (reg == REG_BOARD_TEMP) {
+        // Board temperature [°C] from S-5851A (float, 4 bytes)
+        memcpy(i2cReadBuf, &boardTemp, 4);
+        i2cReadLen = 4;
 
     } else if (reg == REG_DEVICE_ID) {
         i2cReadBuf[0] = 0x20;
