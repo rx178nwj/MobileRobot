@@ -10,6 +10,7 @@ services:
       - /dev/video0:/dev/video0
     volumes:
       - ../mobile_robot_edge:/ros2_ws/src/mobile_robot_edge
+      - ../mobile_robot_server:/ros2_ws/src/mobile_robot_server
       - ../edge_services:/edge_services
       - ./ros2_workspace:/ros2_ws
     environment:

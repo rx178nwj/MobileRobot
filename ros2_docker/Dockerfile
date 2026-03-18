@@ -4,7 +4,7 @@ FROM ros:jazzy-ros-base
 RUN apt-get update && apt-get install -y \
     python3-pip \
     python3-colcon-common-extensions \
-    python3-cv-bridge \
+    ros-jazzy-cv-bridge \
     ros-jazzy-v4l2-camera \
     ros-jazzy-image-transport \
     ros-jazzy-image-transport-plugins \
