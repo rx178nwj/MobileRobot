@@ -70,10 +70,6 @@ class OdometryService:
         self.linear_vel = 0.0
         self.angular_vel = 0.0
 
-        # Previous encoder values
-        self.prev_encoders = [0, 0, 0, 0]
-        self.prev_time = time.time()
-
         # Connected clients
         self.clients: Set[websockets.WebSocketServerProtocol] = set()
 
@@ -83,6 +79,10 @@ class OdometryService:
         else:
             usb_port = config.get('usb_port', '/dev/ttyACM0')
             self.driver = PR2040USBDriver(port=usb_port)
+
+        # Initialize prev_encoders from current hardware values (avoid large initial delta)
+        self.prev_encoders = list(self.driver.read_all_encoders())
+        self.prev_time = time.time()
 
         self.logger.info("Odometry Service initialized")
         self.logger.info(f"Wheel base: {self.wheel_base}m, radius: {self.wheel_radius}m")
@@ -125,12 +125,12 @@ class OdometryService:
 
         # Calculate encoder deltas
         # Left side: average of wheels 0 and 2
-        # Right side: average of wheels 1 and 3
+        # Right side: average of wheels 1 and 3 (negated - mirrored mounting)
         left_enc = (encoders[0] + encoders[2]) / 2.0
-        right_enc = (encoders[1] + encoders[3]) / 2.0
+        right_enc = -(encoders[1] + encoders[3]) / 2.0
 
         prev_left = (self.prev_encoders[0] + self.prev_encoders[2]) / 2.0
-        prev_right = (self.prev_encoders[1] + self.prev_encoders[3]) / 2.0
+        prev_right = -(self.prev_encoders[1] + self.prev_encoders[3]) / 2.0
 
         delta_left = left_enc - prev_left
         delta_right = right_enc - prev_right
