@@ -77,9 +77,12 @@ class OdometryService:
         # Connected clients
         self.clients: Set[websockets.WebSocketServerProtocol] = set()
 
-        # Hardware - USB Serial connection
-        usb_port = config.get('usb_port', '/dev/ttyACM0')
-        self.driver = PR2040USBDriver(port=usb_port)
+        # Hardware - USB Serial connection (shared driver or new instance)
+        if 'driver' in config:
+            self.driver = config['driver']
+        else:
+            usb_port = config.get('usb_port', '/dev/ttyACM0')
+            self.driver = PR2040USBDriver(port=usb_port)
 
         self.logger.info("Odometry Service initialized")
         self.logger.info(f"Wheel base: {self.wheel_base}m, radius: {self.wheel_radius}m")
@@ -190,7 +193,7 @@ class OdometryService:
         interval = 1.0 / self.publish_rate
 
         while True:
-            # Read encoders
+            # Driver is non-blocking (background reader thread)
             try:
                 encoders = self.driver.read_all_encoders()
 
@@ -274,7 +277,8 @@ class OdometryService:
     def shutdown(self):
         """Shutdown service"""
         self.logger.info("Shutting down odometry service...")
-        self.driver.close()
+        if 'driver' not in self.config:
+            self.driver.close()
 
 
 async def main():

@@ -61,9 +61,12 @@ class MotorControlService:
         self.current_linear = 0.0
         self.current_angular = 0.0
 
-        # Hardware - USB Serial connection
-        usb_port = config.get('usb_port', '/dev/ttyACM0')
-        self.driver = PR2040USBDriver(port=usb_port)
+        # Hardware - USB Serial connection (shared driver or new instance)
+        if 'driver' in config:
+            self.driver = config['driver']
+        else:
+            usb_port = config.get('usb_port', '/dev/ttyACM0')
+            self.driver = PR2040USBDriver(port=usb_port)
 
         self.logger.info(f"Motor Control Service initialized")
         self.logger.info(f"Wheel base: {self.wheel_base}m, radius: {self.wheel_radius}m")
@@ -113,24 +116,38 @@ class MotorControlService:
 
         return (left_cps, right_cps)
 
+    def cps_to_duty(self, cps: float) -> int:
+        """Convert counts/sec to duty cycle (-1000 to +1000).
+        Empirical: duty=800 → ~5771 cps. Dead zone below duty≈400.
+        Uses offset mapping: duty = MIN_DUTY + cps * (MAX_DUTY - MIN_DUTY) / MAX_CPS
+        """
+        if abs(cps) < 1.0:
+            return 0
+        MIN_DUTY = 400.0   # Minimum duty to overcome static friction
+        MAX_DUTY = 1000.0
+        MAX_CPS  = 7214.0  # Empirical max counts/sec at duty=1000
+        duty = MIN_DUTY + abs(cps) * (MAX_DUTY - MIN_DUTY) / MAX_CPS
+        duty = min(MAX_DUTY, duty)
+        return int(math.copysign(duty, cps))
+
     def set_motor_velocities(self, linear: float, angular: float):
         """
-        Set motor velocities from cmd_vel
+        Set motor velocities from cmd_vel using DIRECT duty mode.
 
         Args:
             linear: Linear velocity (m/s)
             angular: Angular velocity (rad/s)
         """
-        # Convert to wheel velocities
+        # Convert to wheel velocities (counts/sec)
         left_cps, right_cps = self.cmd_vel_to_wheel_velocities(linear, angular)
 
-        # For 4-wheel differential drive:
-        # Left side: wheels 0 and 2
-        # Right side: wheels 1 and 3
-        velocities = (left_cps, right_cps, left_cps, right_cps)
+        # Convert to duty cycles
+        left_duty  =  self.cps_to_duty(left_cps)
+        right_duty = -self.cps_to_duty(right_cps)   # mirrored mounting
 
-        # Send to motor driver
-        self.driver.set_wheel_velocities(velocities)
+        # For 4-wheel differential drive:
+        # Left side: wheels 0 and 2, Right side: wheels 1 and 3
+        self.driver.set_wheel_duties((left_duty, right_duty, left_duty, right_duty))
 
         # Update state
         self.current_linear = linear
@@ -143,7 +160,7 @@ class MotorControlService:
         )
 
     def stop_motors(self):
-        """Emergency stop - immediately stops all motors"""
+        """Stop all motors (coast stop)."""
         self.driver.stop_all()
         self.current_linear = 0.0
         self.current_angular = 0.0
@@ -182,10 +199,9 @@ class MotorControlService:
                         linear = data.get('linear', 0.0)
                         angular = data.get('angular', 0.0)
 
-                        # Set motor velocities
+                        # Driver is non-blocking (background reader thread)
                         self.set_motor_velocities(linear, angular)
 
-                        # Send acknowledgment
                         response = {
                             'type': 'ack',
                             'linear': self.current_linear,
@@ -226,8 +242,9 @@ class MotorControlService:
     def shutdown(self):
         """Shutdown service"""
         self.logger.info("Shutting down motor control service...")
-        self.stop_motors()
-        self.driver.close()
+        self.driver.stop_all()  # Hard stop on shutdown
+        if 'driver' not in self.config:
+            self.driver.close()
 
 
 async def main():

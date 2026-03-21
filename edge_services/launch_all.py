@@ -16,6 +16,7 @@ from pathlib import Path
 from motor_service import MotorControlService
 from odometry_service import OdometryService
 from camera_service import CameraService
+from hardware.pr2040_usb_driver import PR2040USBDriver
 
 
 class EdgeServiceLauncher:
@@ -37,6 +38,9 @@ class EdgeServiceLauncher:
         self.motor_service = None
         self.odometry_service = None
         self.camera_service = None
+
+        # Shared hardware driver
+        self.shared_driver = None
 
         # Tasks
         self.tasks = []
@@ -139,20 +143,32 @@ class EdgeServiceLauncher:
         self.logger.info("Starting Edge Services")
         self.logger.info("=" * 60)
 
+        # Create shared USB driver (motor & odometry share one serial connection)
+        usb_port = self.config['hardware'].get('usb_port', '/dev/ttyACM0')
+        self.shared_driver = PR2040USBDriver(port=usb_port)
+        if self.shared_driver.connected:
+            self.logger.info(f"✓ PR2040 USB driver connected at {usb_port}")
+        else:
+            self.logger.error(f"✗ PR2040 USB driver failed to connect at {usb_port}")
+
         # Create services
         if self.config['motor_service']['enabled']:
-            self.motor_service = MotorControlService(self._create_motor_config())
+            motor_config = self._create_motor_config()
+            motor_config['driver'] = self.shared_driver
+            self.motor_service = MotorControlService(motor_config)
             self.tasks.append(asyncio.create_task(self.motor_service.run()))
             self.logger.info("✓ Motor Control Service enabled")
 
         if self.config['odometry_service']['enabled']:
-            self.odometry_service = OdometryService(self._create_odometry_config())
+            odom_config = self._create_odometry_config()
+            odom_config['driver'] = self.shared_driver
+            self.odometry_service = OdometryService(odom_config)
             self.tasks.append(asyncio.create_task(self.odometry_service.run()))
             self.logger.info("✓ Odometry Service enabled")
 
         if self.config['camera_service']['enabled']:
             self.camera_service = CameraService(self._create_camera_config())
-            self.tasks.append(asyncio.create_task(self.camera_service.run()))
+            asyncio.create_task(self.camera_service.run())
             self.logger.info("✓ Camera Service enabled")
 
         self.logger.info("=" * 60)
@@ -160,8 +176,12 @@ class EdgeServiceLauncher:
         self.logger.info("Press Ctrl+C to stop")
         self.logger.info("=" * 60)
 
-        # Wait for all tasks
-        await asyncio.gather(*self.tasks)
+        if not self.tasks:
+            self.logger.error("No services started successfully")
+            return
+
+        # Wait for all tasks (run forever until cancelled)
+        await asyncio.gather(*self.tasks, return_exceptions=True)
 
     def shutdown(self):
         """Shutdown all services"""
@@ -175,6 +195,9 @@ class EdgeServiceLauncher:
 
         if self.camera_service:
             self.camera_service.shutdown()
+
+        if self.shared_driver:
+            self.shared_driver.close()
 
         self.logger.info("All services stopped")
 
