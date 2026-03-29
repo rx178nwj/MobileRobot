@@ -40,6 +40,7 @@ class PR2040USBDriver:
     CMD_SET_VEL_SINGLE  = 0x23
     CMD_SET_POS_ALL     = 0x24
     CMD_SET_POS_SINGLE  = 0x25
+    CMD_SET_VEL_PID     = 0x26  # 13B: uint8 index + float kp, ki, kd
 
     # Responses
     RESP_ACK    = 0x80
@@ -99,7 +100,9 @@ class PR2040USBDriver:
             while not self._status_updated and time.time() < deadline:
                 time.sleep(0.05)
 
-            # Ensure DIRECT mode (default after reset; CMD_SET_MOTORS works in this mode)
+            # Control mode: MODE_DIRECT  = open-loop duty (Python-side PID)
+            #               MODE_VELOCITY = firmware velocity PID
+            # Default is DIRECT so the Python-side PI+FF controller drives the motors.
             self._set_mode_all(self.MODE_DIRECT)
 
         except serial.SerialException as e:
@@ -225,6 +228,22 @@ class PR2040USBDriver:
             return False
         data = struct.pack('<ffff', *velocities)
         return self._send_cmd(self.CMD_SET_VEL_ALL, data)
+
+    def set_velocity_pid_gains(self, index: int, kp: float, ki: float, kd: float) -> bool:
+        """
+        Set velocity PID gains for one wheel (firmware VELOCITY mode).
+
+        Args:
+            index: Wheel index (0-3)
+            kp, ki, kd: PID gains
+
+        Note: Only effective when MODE_VELOCITY is active.
+              Call _set_mode_all(MODE_VELOCITY) first.
+        """
+        if not self.connected:
+            return False
+        data = struct.pack('<Bfff', index, kp, ki, kd)
+        return self._send_cmd(self.CMD_SET_VEL_PID, data)
 
     def set_wheel_duties(self, duties: Tuple[int, int, int, int]) -> bool:
         """Set duty cycles directly for all 4 wheels (-1000 to +1000, DIRECT mode)."""
