@@ -51,6 +51,12 @@ try:
 except ImportError:
     OPENAI_AVAILABLE = False
 
+try:
+    from ultralytics import YOLO
+    YOLO_AVAILABLE = True
+except Exception:
+    YOLO_AVAILABLE = False
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -62,19 +68,19 @@ MODE_IDLE = 'idle'
 
 _SYSTEM_NAVIGATE = (
     'You are controlling a differential-drive mobile robot. '
-    'You receive a camera image (forward-facing) and a navigation goal described in text. '
+    'You receive a scene description and a navigation goal. '
     'Determine the single best action to take right now. '
-    'Reply with ONLY valid JSON, no markdown: '
+    'Reply with ONLY valid JSON, no markdown, no explanation: '
     '{"action": "move_forward"|"turn_left"|"turn_right"|"stop"|"arrived", '
     '"reason": "<one sentence>"}'
 )
 
 _SYSTEM_TRACK = (
     'You are controlling a differential-drive mobile robot that must follow a person. '
-    'Analyze the camera image. '
+    'Analyze the scene description. '
     'If a person is visible: determine whether they are left/center/right and how far. '
     'If no person: search by turning slowly. '
-    'Reply with ONLY valid JSON, no markdown: '
+    'Reply with ONLY valid JSON, no markdown, no explanation: '
     '{"action": "move_forward"|"turn_left"|"turn_right"|"stop"|"search", '
     '"person_detected": true|false, '
     '"person_position": "left"|"center"|"right"|"none", '
@@ -83,11 +89,11 @@ _SYSTEM_TRACK = (
 
 _SYSTEM_EXPLORE = (
     'You are controlling a differential-drive mobile robot exploring an unknown room. '
-    'Analyze the camera image for obstacles, open space, and unexplored areas. '
-    'Choose the safest direction to move and build a mental map. '
-    'Reply with ONLY valid JSON, no markdown: '
+    'You receive a text description of the scene. '
+    'Choose the safest direction to move. '
+    'Reply with ONLY valid JSON, no markdown, no explanation: '
     '{"action": "move_forward"|"turn_left"|"turn_right"|"stop", '
-    '"observation": "<one sentence describing what you see>"}'
+    '"observation": "<one sentence>"}'
 )
 
 
@@ -97,29 +103,54 @@ class LLMNavController(Node):
         super().__init__('llm_nav_controller')
 
         # ---- Parameters ----
-        self.declare_parameter('openai_api_key', os.environ.get('OPENAI_API_KEY', ''))
+        self.declare_parameter('openai_api_key', os.environ.get('OPENAI_API_KEY', 'local'))
+        self.declare_parameter('llm_base_url', os.environ.get('LLM_BASE_URL', ''))
         self.declare_parameter('model', 'gpt-4o')
         self.declare_parameter('llm_interval', 2.0)   # seconds between LLM calls
         self.declare_parameter('linear_speed', 0.25)  # m/s forward
         self.declare_parameter('angular_speed', 0.5)  # rad/s turning
         self.declare_parameter('jpeg_quality', 70)
         self.declare_parameter('max_image_width', 480)
+        self.declare_parameter('vision_enabled', True)
+        self.declare_parameter('use_object_detection', False)
+        self.declare_parameter('yolo_model', 'yolov8n.pt')
+        self.declare_parameter('yolo_conf', 0.3)
 
         api_key = self.get_parameter('openai_api_key').value
+        base_url = self.get_parameter('llm_base_url').value
         self.model = self.get_parameter('model').value
         self.llm_interval = self.get_parameter('llm_interval').value
         self.linear_speed = self.get_parameter('linear_speed').value
         self.angular_speed = self.get_parameter('angular_speed').value
         self.jpeg_quality = self.get_parameter('jpeg_quality').value
         self.max_image_width = self.get_parameter('max_image_width').value
+        self.vision_enabled = self.get_parameter('vision_enabled').value
+        self.use_object_detection = self.get_parameter('use_object_detection').value
+        self.yolo_conf = self.get_parameter('yolo_conf').value
+
+        # YOLO setup
+        self.yolo = None
+        if self.use_object_detection:
+            if YOLO_AVAILABLE:
+                yolo_model = self.get_parameter('yolo_model').value
+                self.yolo = YOLO(yolo_model)
+                self.get_logger().info(f'YOLO object detection enabled (model: {yolo_model})')
+            else:
+                self.get_logger().warn(
+                    'use_object_detection=True but ultralytics not installed; '
+                    'falling back to edge-based scene analysis'
+                )
 
         if not OPENAI_AVAILABLE:
             self.get_logger().error('openai package not installed — run: pip install openai')
-        elif not api_key:
-            self.get_logger().error('OPENAI_API_KEY not set — LLM calls will fail')
         else:
-            self.llm_client = OpenAI(api_key=api_key)
-            self.get_logger().info(f'OpenAI client ready (model: {self.model})')
+            client_kwargs = {'api_key': api_key or 'local'}
+            if base_url:
+                client_kwargs['base_url'] = base_url
+            self.llm_client = OpenAI(**client_kwargs)
+            self.get_logger().info(
+                f'LLM client ready (model: {self.model}, base_url: {base_url or "openai default"})'
+            )
 
         self.bridge = CvBridge()
 
@@ -130,6 +161,7 @@ class LLMNavController(Node):
         self._latest_frame: np.ndarray | None = None
         self._last_llm_time = 0.0
         self._llm_busy = False
+        self._current_twist = Twist()  # last action, republished at 4 Hz
 
         # ---- Subscribers ----
         self.create_subscription(Image, '/camera/image_raw', self._cb_image, 10)
@@ -141,8 +173,10 @@ class LLMNavController(Node):
         self.goal_pub = self.create_publisher(PoseStamped, '/goal_pose', 10)
         self.status_pub = self.create_publisher(String, '/llm_status', 10)
 
-        # ---- Control timer (10 Hz) ----
+        # ---- Control timer (10 Hz) — LLM scheduling ----
         self.create_timer(0.1, self._control_tick)
+        # ---- Republish timer (4 Hz) — keep motor service alive ----
+        self.create_timer(0.25, self._republish_twist)
 
         self.get_logger().info('LLM Nav Controller started — waiting for /llm_command')
 
@@ -197,7 +231,9 @@ class LLMNavController(Node):
             elapsed = now - self._last_llm_time
             busy = self._llm_busy
 
-        if mode == MODE_IDLE or frame is None or busy:
+        if mode == MODE_IDLE or busy:
+            return
+        if (self.vision_enabled or self.use_object_detection) and frame is None:
             return
 
         if elapsed < self.llm_interval:
@@ -206,7 +242,7 @@ class LLMNavController(Node):
         with self._lock:
             self._last_llm_time = now
             self._llm_busy = True
-            frame_copy = frame.copy()
+            frame_copy = frame.copy() if frame is not None else None
 
         threading.Thread(
             target=self._llm_step,
@@ -232,34 +268,90 @@ class LLMNavController(Node):
             with self._lock:
                 self._llm_busy = False
 
-    def _call_vision(self, frame: np.ndarray, system: str, user: str) -> dict:
-        """Send image + prompt to GPT-4o, return parsed JSON dict."""
-        b64 = self._encode_frame(frame)
+    def _extract_scene_description(self, frame: np.ndarray) -> str:
+        """Detect objects in frame and return text description for the LLM."""
+        h, w = frame.shape[:2]
+
+        if self.yolo is not None:
+            results = self.yolo(frame, verbose=False, conf=self.yolo_conf)[0]
+            if len(results.boxes) == 0:
+                return 'No objects detected in the camera view.'
+            items = []
+            for box in results.boxes:
+                cls_name = results.names[int(box.cls[0])]
+                x_center = float(box.xywhn[0][0])
+                y_center = float(box.xywhn[0][1])
+                pos_h = 'left' if x_center < 0.33 else ('right' if x_center > 0.67 else 'center')
+                pos_v = 'close' if y_center > 0.6 else 'far'
+                items.append(f'{cls_name} ({pos_h}, {pos_v})')
+            return 'Detected objects: ' + ', '.join(items) + '.'
+
+        # Fallback: edge density analysis per region
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        zones = {
+            'left':   cv2.Canny(gray[:, :w // 3],         50, 150).mean(),
+            'center': cv2.Canny(gray[:, w // 3:2 * w // 3], 50, 150).mean(),
+            'right':  cv2.Canny(gray[:, 2 * w // 3:],     50, 150).mean(),
+        }
+        thresh = 5.0
+        parts = [
+            'obstacle ahead' if zones['center'] > thresh else 'clear path ahead',
+            'obstacle on left' if zones['left'] > thresh else 'open space on left',
+            'obstacle on right' if zones['right'] > thresh else 'open space on right',
+        ]
+        return 'Scene analysis: ' + ', '.join(parts) + '.'
+
+    def _call_vision(self, frame: np.ndarray | None, system: str, user: str) -> dict:
+        """Send prompt (+ image or scene description) to LLM, return parsed JSON dict."""
+        if self.vision_enabled and frame is not None:
+            b64 = self._encode_frame(frame)
+            user_content = [
+                {
+                    'type': 'image_url',
+                    'image_url': {
+                        'url': f'data:image/jpeg;base64,{b64}',
+                        'detail': 'low',
+                    },
+                },
+                {'type': 'text', 'text': user},
+            ]
+        elif self.use_object_detection and frame is not None:
+            scene = self._extract_scene_description(frame)
+            self.get_logger().debug(f'Scene: {scene}')
+            user_content = f'/no_think {scene}\n\n{user}'
+        else:
+            user_content = f'/no_think {user}'
+
         response = self.llm_client.chat.completions.create(
             model=self.model,
             messages=[
                 {'role': 'system', 'content': system},
-                {'role': 'user', 'content': [
-                    {
-                        'type': 'image_url',
-                        'image_url': {
-                            'url': f'data:image/jpeg;base64,{b64}',
-                            'detail': 'low',
-                        },
-                    },
-                    {'type': 'text', 'text': user},
-                ]},
+                {'role': 'user', 'content': user_content},
             ],
-            max_tokens=150,
-            temperature=0.2,
+            max_tokens=2000,
+            temperature=0.1,
         )
-        raw = response.choices[0].message.content.strip()
-        self.get_logger().debug(f'LLM raw: {raw}')
+        msg = response.choices[0].message
+        raw = (msg.content or '').strip()
+        # Qwen3 thinking mode: answer may be in reasoning_content when content is empty
+        if not raw:
+            raw = (getattr(msg, 'reasoning_content', None) or '').strip()
+        self.get_logger().info(f'LLM raw: {raw[:300]}')
+        # Strip <think>...</think> blocks
+        if '<think>' in raw:
+            import re
+            raw = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
         # Strip markdown fences if model adds them
         if raw.startswith('```'):
             raw = raw.split('```')[1]
             if raw.startswith('json'):
                 raw = raw[4:]
+        # Extract first JSON object if extra text surrounds it
+        if raw and not raw.startswith('{'):
+            import re
+            m = re.search(r'\{.*\}', raw, re.DOTALL)
+            if m:
+                raw = m.group(0)
         return json.loads(raw)
 
     def _encode_frame(self, frame: np.ndarray) -> str:
@@ -346,9 +438,21 @@ class LLMNavController(Node):
         elif action == 'search':
             twist.angular.z = self.angular_speed * 0.5
         # 'stop' and 'arrived' → zero twist (robot stops)
+        with self._lock:
+            self._current_twist = twist
         self.cmd_vel_pub.publish(twist)
 
+    def _republish_twist(self):
+        """Republish last twist at 4 Hz to prevent motor safety timeout."""
+        with self._lock:
+            mode = self._mode
+            twist = self._current_twist
+        if mode != MODE_IDLE:
+            self.cmd_vel_pub.publish(twist)
+
     def _stop_robot(self):
+        with self._lock:
+            self._current_twist = Twist()
         self.cmd_vel_pub.publish(Twist())
 
     def _publish_status(self, text: str):

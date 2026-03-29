@@ -11,12 +11,15 @@ Data flow:
   /odom                          │
   TF: odom → base_footprint      ┘
 
+  ⓪ ydlidar_ros2_driver  (YDLIDAR T-mini Plus)
+        /dev/ttyUSB0  →  /scan (LaserScan, 360°, 10 Hz)
+
   ① image_transport/republish
         /camera/image_raw/compressed  →  /camera/image_raw
 
-  ② rtabmap_slam/rtabmap  (Monocular RGB + Odometry mode)
-        /camera/image_raw + /camera/camera_info + /odom
-        →  /map (OccupancyGrid)
+  ② slam_toolbox  (2D LiDAR SLAM)
+        /scan (YDLIDAR T-mini Plus) + /odom
+        →  /map (OccupancyGrid, 5cm)
         →  TF: map → odom
 
   ③ Nav2 (navigation_launch.py)
@@ -49,18 +52,19 @@ Usage:
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, GroupAction
-from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.actions import DeclareLaunchArgument, GroupAction
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node, SetRemap
+from launch_ros.actions import Node, SetParameter
+from nav2_common.launch import RewrittenYaml
 
 
 def generate_launch_description():
-    pkg_server = get_package_share_directory('mobile_robot_server')
-    pkg_nav2   = get_package_share_directory('nav2_bringup')
+    pkg_server  = get_package_share_directory('mobile_robot_server')
+    pkg_ydlidar = get_package_share_directory('ydlidar_ros2_driver')
 
-    rtabmap_cfg = os.path.join(pkg_server, 'config', 'rtabmap_params.yaml')
-    nav2_cfg    = os.path.join(pkg_server, 'config', 'nav2_params.yaml')
+    slam_cfg    = os.path.join(pkg_server,  'config', 'slam_toolbox_params.yaml')
+    nav2_cfg    = os.path.join(pkg_server,  'config', 'nav2_params.yaml')
+    lidar_cfg   = os.path.join(pkg_ydlidar, 'params', 'Tmini.yaml')
 
     # ---- Launch arguments ----
     use_sim_time    = DeclareLaunchArgument('use_sim_time',    default_value='false')
@@ -69,7 +73,109 @@ def generate_launch_description():
     angular_speed   = DeclareLaunchArgument('angular_speed',   default_value='0.5')
     delete_db       = DeclareLaunchArgument(
         'delete_db_on_start', default_value='true',
-        description='Delete RTAB-Map DB on start (true=mapping, false=localization only)')
+        description='(unused) kept for backward compat')
+
+    lidar_port = DeclareLaunchArgument(
+        'lidar_port', default_value='/dev/ttyUSB0',
+        description='YDLIDAR T-mini Plus serial port')
+
+    llm_base_url = DeclareLaunchArgument(
+        'llm_base_url',
+        default_value=os.environ.get('LLM_BASE_URL', 'http://Nadia.local:1234/v1'),
+        description='LM Studio / OpenAI-compatible API base URL (e.g. http://192.168.1.5:1234/v1)')
+
+    llm_model = DeclareLaunchArgument(
+        'llm_model',
+        default_value=os.environ.get('LLM_MODEL', 'openai/gpt-oss-20b'),
+        description='Model name to use for LLM navigation')
+
+    # ------------------------------------------------------------------
+    # Edge bridge nodes  (connect to edge_services via WebSocket)
+    # ------------------------------------------------------------------
+    ws_motor = Node(
+        package='mobile_robot_edge',
+        executable='ws_motor_controller',
+        name='ws_motor_controller',
+        output='screen',
+        parameters=[{'ws_uri': 'ws://localhost:8001'}],
+        respawn=True, respawn_delay=5.0,
+    )
+
+    ws_odom = Node(
+        package='mobile_robot_edge',
+        executable='ws_odometry_publisher',
+        name='ws_odometry_publisher',
+        output='screen',
+        parameters=[{
+            'ws_uri': 'ws://localhost:8002',
+            'frame_id': 'odom',
+            'child_frame_id': 'base_footprint',
+        }],
+        respawn=True, respawn_delay=5.0,
+    )
+
+    ws_camera = Node(
+        package='mobile_robot_edge',
+        executable='ws_camera_bridge',
+        name='ws_camera_bridge',
+        output='screen',
+        parameters=[{
+            'ws_uri': 'ws://localhost:8003',
+            'frame_id': 'camera_optical_frame',
+            'width': 640,
+            'height': 480,
+        }],
+        respawn=True, respawn_delay=5.0,
+    )
+
+    robot_urdf = (
+        '<?xml version="1.0"?>'
+        '<robot name="mobile_robot">'
+        '<link name="base_footprint"/>'
+        '<link name="base_link"/>'
+        '<joint name="base_footprint_joint" type="fixed">'
+        '<parent link="base_footprint"/><child link="base_link"/>'
+        '<origin xyz="0 0 0.033"/>'
+        '</joint>'
+        '<link name="laser_frame"/>'
+        '<joint name="laser_joint" type="fixed">'
+        '<parent link="base_link"/><child link="laser_frame"/>'
+        '<origin xyz="0.05 0 0.08"/>'
+        '</joint>'
+        '<link name="camera_optical_frame"/>'
+        '<joint name="camera_joint" type="fixed">'
+        '<parent link="base_link"/><child link="camera_optical_frame"/>'
+        '<origin xyz="0.10 0 0.10" rpy="-1.5708 0 -1.5708"/>'
+        '</joint>'
+        '</robot>'
+    )
+
+    robot_state_pub = Node(
+        package='robot_state_publisher',
+        executable='robot_state_publisher',
+        name='robot_state_publisher',
+        output='screen',
+        parameters=[{
+            'robot_description': robot_urdf,
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+        }],
+    )
+
+    # ------------------------------------------------------------------
+    # ⓪ YDLIDAR T-mini Plus
+    #    /scan (sensor_msgs/LaserScan) @ 10 Hz, 360°, 0.03–12 m
+    # ------------------------------------------------------------------
+    ydlidar = Node(
+        package='ydlidar_ros2_driver',
+        executable='ydlidar_ros2_driver_node',
+        name='ydlidar_ros2_driver_node',
+        output='screen',
+        parameters=[
+            lidar_cfg,
+            {'port': LaunchConfiguration('lidar_port')},
+            {'use_sim_time': LaunchConfiguration('use_sim_time')},
+        ],
+    )
 
     # ------------------------------------------------------------------
     # ① Image decompression
@@ -82,59 +188,158 @@ def generate_launch_description():
         executable='republish',
         name='image_decompress',
         output='screen',
-        arguments=['compressed', 'raw'],
         remappings=[
             ('in/compressed', '/camera/image_raw/compressed'),
             ('out',           '/camera/image_raw'),
         ],
-        parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
+        parameters=[{
+            'in_transport':  'compressed',
+            'out_transport': 'raw',
+            'use_sim_time':  LaunchConfiguration('use_sim_time'),
+        }],
     )
 
     # ------------------------------------------------------------------
-    # ② RTAB-Map — Monocular Visual SLAM
+    # ② slam_toolbox — 2D LiDAR SLAM
     #
-    #    Mode: RGB + Odometry (no depth)
-    #    - /camera/image_raw  →  visual feature extraction & loop closure
-    #    - /odom              →  scale reference & motion prior
+    #    /scan (YDLIDAR T-mini Plus, BEST_EFFORT) + /odom
     #    Publishes:
-    #    - /map               →  Nav2 global costmap
+    #    - /map               →  Nav2 global costmap (OccupancyGrid 5cm)
     #    - TF map → odom      →  self-localization
     # ------------------------------------------------------------------
-    rtabmap = Node(
-        package='rtabmap_slam',
-        executable='rtabmap',
-        name='rtabmap',
+    slam = Node(
+        package='slam_toolbox',
+        executable='async_slam_toolbox_node',
+        name='slam_toolbox',
         output='screen',
         parameters=[
-            rtabmap_cfg,
+            slam_cfg,
             {'use_sim_time': LaunchConfiguration('use_sim_time')},
         ],
-        remappings=[
-            # monocular mode: map rgb/* to camera topics
-            ('rgb/image',       '/camera/image_raw'),
-            ('rgb/camera_info', '/camera/camera_info'),
-            ('odom',            '/odom'),
-        ],
-        arguments=['--delete_db_on_start'],  # always fresh map on launch
+        remappings=[('/scan', '/scan')],
+    )
+
+    lifecycle_manager_slam = Node(
+        package='nav2_lifecycle_manager',
+        executable='lifecycle_manager',
+        name='lifecycle_manager_slam',
+        output='screen',
+        parameters=[{
+            'autostart': True,
+            'node_names': ['slam_toolbox'],
+            'bond_timeout': 0.0,  # disable bond — slam_toolbox heartbeat can lag under TF load
+        }],
     )
 
     # ------------------------------------------------------------------
-    # ③ Nav2 — Path planning & navigation
-    #    navigation_launch.py starts:
-    #      planner_server, controller_server, bt_navigator,
-    #      behavior_server, velocity_smoother, lifecycle_manager
-    #    Does NOT start map_server (map comes from RTAB-Map /map topic)
+    # ③ Nav2 — Path planning & navigation (no docking_server)
+    #    Inline node definitions to exclude docking_server, which crashes
+    #    in Jazzy when dock_plugins is empty.
     # ------------------------------------------------------------------
-    nav2 = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(pkg_nav2, 'launch', 'navigation_launch.py')
-        ),
-        launch_arguments={
-            'params_file': nav2_cfg,
-            'use_sim_time': LaunchConfiguration('use_sim_time'),
-            'autostart': 'true',
-        }.items(),
+    configured_nav2_params = RewrittenYaml(
+        source_file=nav2_cfg,
+        root_key='',
+        param_rewrites={},
+        convert_types=True,
     )
+    tf_remaps = [('/tf', 'tf'), ('/tf_static', 'tf_static')]
+    autostart = True
+
+    nav2 = GroupAction([
+        SetParameter('use_sim_time', LaunchConfiguration('use_sim_time')),
+        Node(
+            package='nav2_controller',
+            executable='controller_server',
+            output='screen',
+            parameters=[configured_nav2_params],
+            remappings=tf_remaps + [('cmd_vel', 'cmd_vel_nav')],
+        ),
+        Node(
+            package='nav2_smoother',
+            executable='smoother_server',
+            name='smoother_server',
+            output='screen',
+            parameters=[configured_nav2_params],
+            remappings=tf_remaps,
+        ),
+        Node(
+            package='nav2_planner',
+            executable='planner_server',
+            name='planner_server',
+            output='screen',
+            parameters=[configured_nav2_params],
+            remappings=tf_remaps,
+        ),
+        Node(
+            package='nav2_route',
+            executable='route_server',
+            name='route_server',
+            output='screen',
+            parameters=[configured_nav2_params],
+            remappings=tf_remaps,
+        ),
+        Node(
+            package='nav2_behaviors',
+            executable='behavior_server',
+            name='behavior_server',
+            output='screen',
+            parameters=[configured_nav2_params],
+            remappings=tf_remaps + [('cmd_vel', 'cmd_vel_nav')],
+        ),
+        Node(
+            package='nav2_bt_navigator',
+            executable='bt_navigator',
+            name='bt_navigator',
+            output='screen',
+            parameters=[configured_nav2_params],
+            remappings=tf_remaps,
+        ),
+        Node(
+            package='nav2_waypoint_follower',
+            executable='waypoint_follower',
+            name='waypoint_follower',
+            output='screen',
+            parameters=[configured_nav2_params],
+            remappings=tf_remaps,
+        ),
+        Node(
+            package='nav2_velocity_smoother',
+            executable='velocity_smoother',
+            name='velocity_smoother',
+            output='screen',
+            parameters=[configured_nav2_params],
+            remappings=tf_remaps + [('cmd_vel', 'cmd_vel_nav'), ('cmd_vel_smoothed', 'cmd_vel')],
+        ),
+        Node(
+            package='nav2_collision_monitor',
+            executable='collision_monitor',
+            name='collision_monitor',
+            output='screen',
+            parameters=[configured_nav2_params],
+            remappings=tf_remaps,
+        ),
+        Node(
+            package='nav2_lifecycle_manager',
+            executable='lifecycle_manager',
+            name='lifecycle_manager_navigation',
+            output='screen',
+            parameters=[{
+                'autostart': autostart,
+                'bond_timeout': 30.0,
+                'node_names': [
+                    'controller_server',
+                    'smoother_server',
+                    'planner_server',
+                    'route_server',
+                    'behavior_server',
+                    'bt_navigator',
+                    'waypoint_follower',
+                    'velocity_smoother',
+                    'collision_monitor',
+                ],
+            }],
+        ),
+    ])
 
     # ------------------------------------------------------------------
     # ④ LLM Navigation Controller
@@ -147,8 +352,9 @@ def generate_launch_description():
         name='llm_nav_controller',
         output='screen',
         parameters=[{
-            'openai_api_key': os.environ.get('OPENAI_API_KEY', ''),
-            'model':          'gpt-4o',
+            'openai_api_key': os.environ.get('OPENAI_API_KEY', 'local'),
+            'llm_base_url':   LaunchConfiguration('llm_base_url'),
+            'model':          LaunchConfiguration('llm_model'),
             'llm_interval':   LaunchConfiguration('llm_interval'),
             'linear_speed':   LaunchConfiguration('linear_speed'),
             'angular_speed':  LaunchConfiguration('angular_speed'),
@@ -162,8 +368,17 @@ def generate_launch_description():
         linear_speed,
         angular_speed,
         delete_db,
+        lidar_port,
+        llm_base_url,
+        llm_model,
+        robot_state_pub,
+        ws_motor,
+        ws_odom,
+        ws_camera,
+        ydlidar,
         image_decompress,
-        rtabmap,
+        slam,
+        lifecycle_manager_slam,
         nav2,
         llm_nav,
     ])

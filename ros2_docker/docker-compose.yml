@@ -8,6 +8,7 @@ services:
     devices:
       - /dev/i2c-1:/dev/i2c-1
       - /dev/video0:/dev/video0
+      - /dev/ttyUSB0:/dev/ttyUSB0
     volumes:
       - ../mobile_robot_edge:/ros2_ws/src/mobile_robot_edge
       - ../mobile_robot_server:/ros2_ws/src/mobile_robot_server

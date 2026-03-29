@@ -94,9 +94,9 @@ class WebSocketMotorController(Node):
                                 )
                                 resp_data = json.loads(response)
 
-                                if resp_data.get('status') != 'ok':
+                                if resp_data.get('type') != 'ack':
                                     self.get_logger().warn(
-                                        f'Motor command failed: {resp_data.get("message")}'
+                                        f'Motor command failed: {resp_data}'
                                     )
 
                             else:

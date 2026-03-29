@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'llm_nav_controller = mobile_robot_server.llm_nav_controller:main',
+            'autonomous_mapping = mobile_robot_server.autonomous_mapping:main',
         ],
     },
 )

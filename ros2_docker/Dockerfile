@@ -25,6 +25,13 @@ RUN apt-get update && apt-get install -y \
     nano \
     && rm -rf /var/lib/apt/lists/*
 
+# Install YDLidar SDK
+RUN git clone https://github.com/YDLIDAR/YDLidar-SDK.git /tmp/YDLidar-SDK && \
+    cmake -S /tmp/YDLidar-SDK -B /tmp/YDLidar-SDK/build -DCMAKE_INSTALL_PREFIX=/usr/local && \
+    cmake --build /tmp/YDLidar-SDK/build -j4 && \
+    cmake --install /tmp/YDLidar-SDK/build && \
+    rm -rf /tmp/YDLidar-SDK
+
 # Install Python dependencies
 RUN pip3 install --break-system-packages smbus2 websockets openai
 

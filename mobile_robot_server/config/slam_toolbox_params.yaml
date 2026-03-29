@@ -1,0 +1,60 @@
+slam_toolbox:
+  ros__parameters:
+
+    # ---- フレーム設定 ----
+    odom_frame:  odom
+    map_frame:   map
+    base_frame:  base_footprint
+    scan_topic:  /scan
+
+    # ---- 動作モード ----
+    mode: mapping   # online asynchronous mapping
+
+    # ---- マップ解像度 ----
+    resolution:         0.05    # 5cm (Nav2と一致)
+    max_laser_range:    8.0     # YDLIDAR T-mini Plus 実用レンジ
+    minimum_time_interval: 0.5  # 最短マップ更新間隔(秒)
+
+    # ---- TF 発行 ----
+    transform_publish_period: 0.02   # map→odom TF発行周期(50Hz)
+    transform_timeout:        0.2    # TF待機タイムアウト(秒)
+
+    # ---- スキャンマッチング ----
+    use_scan_matching:    true
+    use_scan_barycenter:  true
+
+    # ---- 移動しきい値 (キーフレーム追加条件) ----
+    minimum_travel_distance:  0.10   # 10cm移動ごと
+    minimum_travel_heading:   0.087  # ~5度回転ごと
+
+    # ---- マップ更新間隔 ----
+    map_update_interval: 3.0   # 3秒ごとにNav2向けマップ配信
+
+    # ---- ループクローズ ----
+    loop_search_space_dimension: 8.0
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_maximum_variance_coarse:  3.0
+    loop_match_minimum_response_fine:    0.45
+    loop_match_maximum_variance_fine:    0.25
+
+    # ---- スキャンバッファ ----
+    scan_buffer_size:                    10
+    scan_buffer_maximum_scan_distance:   10.0
+
+    # ---- 相関スキャンマッチャ ----
+    distance_variance_penalty:    0.5
+    angle_variance_penalty:       1.0
+    fine_search_angle_offset:     0.00349
+    coarse_search_angle_offset:   0.349
+    coarse_angle_resolution:      0.0349
+    minimum_angle_penalty:        0.9
+    minimum_distance_penalty:     0.5
+    use_response_expansion:       true
+
+    # ---- Ceres ソルバー ----
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver:    SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner:   SCHUR_JACOBI
+    ceres_trust_strategy:   LEVENBERG_MARQUARDT
+    ceres_dogleg_type:      TRADITIONAL_DOGLEG
+    ceres_loss_function:    None

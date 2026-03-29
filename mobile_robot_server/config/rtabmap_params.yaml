@@ -1,17 +1,18 @@
 # =============================================================================
-# RTAB-Map parameters — Monocular Camera + Wheel Odometry (RGB + Odometry mode)
+# RTAB-Map parameters — Monocular Camera + LiDAR + Wheel Odometry
 # =============================================================================
 #
-# 構成: 単眼カメラ(RGB) + ホイールオドメトリ のフュージョンSLAM
-#
-# スケール情報の取得について:
-#   単眼カメラ単体ではスケールが不定だが、車輪オドメトリ(/odom)を
-#   モーションプライアとして使用することで正確なスケールを回復する。
+# 構成: 単眼カメラ(RGB) + 2D LiDAR(YDLIDAR T-mini Plus) + ホイールオドメトリ
 #
 # データフロー:
-#   /camera/image_raw  ─┐
-#   /camera/camera_info │  →  rtabmap  →  /map  +  TF(map→odom)
-#   /odom              ─┘
+#   /camera/image_raw   ─┐
+#   /camera/camera_info  │  →  rtabmap  →  /map  +  TF(map→odom)
+#   /odom               ─┤
+#   /scan (LiDAR)       ─┘
+#
+# LiDARの役割:
+#   - 占有グリッドマップの障害物検出精度向上
+#   - ループクローズ検証のICP補助
 # =============================================================================
 
 rtabmap:
@@ -22,13 +23,13 @@ rtabmap:
     odom_frame_id:  odom
     map_frame_id:   map
 
-    # ---- 購読モード設定 (重要: 単眼モード) ----
-    subscribe_depth:  false   # ← 深度カメラなし → false必須
-    subscribe_rgb:    true    # ← 単眼カメラ使用
+    # ---- 購読モード設定 ----
+    subscribe_depth:  false   # 深度カメラなし
+    subscribe_rgb:    true    # 単眼カメラ使用
     subscribe_stereo: false
-    subscribe_scan:   false
+    subscribe_scan:   true    # YDLIDAR T-mini Plus → 2D occupancy grid生成に使用
     subscribe_scan_cloud: false
-    subscribe_odom:   true    # ← ホイールオドメトリを使用
+    subscribe_odom:   false   # 動作確認中は無効化（タイムスタンプ同期問題を回避）
 
     # ---- キーフレーム生成の閾値 ----
     # ロボットがこの距離/角度以上移動したときのみ新しいノード(キーフレーム)を作成
@@ -59,14 +60,30 @@ rtabmap:
     Mem/ReduceGraph:        "false"  # グラフ間引き無効(精度優先)
 
     # ---- 2D占有グリッドマップ生成 ----
-    # 深度カメラなしのため、視覚特徴を地表面に投影してマップを作成
-    Grid/FromDepth:    "false"   # ← 単眼必須: depthなしでグリッド生成
+    # LiDARスキャンを使用してマップを生成
+    RGBD/CreateOccupancyGrid: "true"   # 各キーフレームに占有グリッドを生成(必須)
+    Grid/FromDepth:    "false"   # 深度カメラ不使用
+    Grid/Sensor:       "1"       # 0=depth, 1=LiDAR scan ← スキャン優先
+    Grid/3D:           "false"   # 2Dグリッドのみ生成(深度不要)
     Grid/CellSize:     "0.05"   # 5cm解像度
-    Grid/RangeMax:     "4.0"    # 最大マッピング距離(m)
+    Grid/RangeMax:     "12.0"   # T-mini Plus の最大レンジ(m)
     Grid/RayTracing:   "true"   # レイトレーシングで空き空間を推定
+    Grid/RangeMin:     "0.2"    # 最小レンジ(近すぎるノイズ除去)
 
     # ---- 更新レート ----
     Rtabmap/DetectionRate: "1"  # ループ閉じ込み検出頻度(Hz) — CPUに応じて調整
 
     # ---- マッチング戦略 ----
     Reg/Strategy: "0"  # 0=Visual, 1=ICP, 2=Visual+ICP → 単眼は0
+
+    # ---- QoS / 同期設定 ----
+    # YDLIDAR は BEST_EFFORT (SENSOR_DATA) で publish するため
+    # RTABMap も BEST_EFFORT に合わせる (2 = BEST_EFFORT)
+    qos: 2
+
+    # RTABMap ROS2 の正しいパラメータ名
+    topic_queue_size: 30
+    sync_queue_size: 30
+
+    # ApproximateTime 同期の許容時間差 (秒)
+    approx_sync_max_interval: 0.5
