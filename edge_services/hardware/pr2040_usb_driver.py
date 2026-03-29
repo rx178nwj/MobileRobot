@@ -108,6 +108,9 @@ class PR2040USBDriver:
             for wheel in range(4):
                 self.set_velocity_pid_gains(wheel, kp=0.10, ki=0.40, kd=0.0)
             self._set_mode_all(self.MODE_VELOCITY)
+            # Zero velocity targets immediately — firmware retains previous targets
+            # across mode switches, so motors would restart on next MODE_VELOCITY.
+            self.set_wheel_velocities((0.0, 0.0, 0.0, 0.0))
             self.logger.info("PR2040 set to VELOCITY mode (kp=0.10, ki=0.40, kd=0.00)")
 
         except serial.SerialException as e:
