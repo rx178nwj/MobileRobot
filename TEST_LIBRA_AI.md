@@ -145,13 +145,13 @@ nvidia-smi --query-gpu=memory.used,memory.free --format=csv
 
 | ID | テスト項目 | 内容 | 合格基準 | 結果 |
 |----|-----------|------|---------|------|
-| T4-1 | パイプライン直列動作 | YOLO scene text → Ollama → JSON まで一気通貫 | エラーなし | |
-| T4-2 | navigate end-to-end | 人物画像 → `"go to the person"` → action | `move_forward` or `turn_left/right` | |
-| T4-3 | track end-to-end | 人物左側画像 → track mode | `{"person_position": "left", "action": "turn_left"}` | |
-| T4-4 | explore end-to-end | 空間画像 → explore mode | `{"action": "move_forward", "observation": "..."}` | |
-| T4-5 | 全体レイテンシ | 画像入力 → JSON出力までの時間 | 3秒以内（YOLO+Ollama合計） | |
-| T4-6 | 連続処理（10回） | 同一画像を10回繰り返し処理 | 全回エラーなし・安定したaction | |
-| T4-7 | VRAM同時使用 | YOLO + Ollama 同時ロード時のVRAM | 8GB超過しない | |
+| T4-1 | パイプライン直列動作 | YOLO scene text → Ollama → JSON まで一気通貫 | エラーなし | ✅ PASS (1.35s, action=move_forward) |
+| T4-2 | navigate end-to-end | 人物画像 → `"go to the person"` → action | `move_forward` or `turn_left/right` | ✅ PASS (action=turn_left, 1.68s) |
+| T4-3 | track end-to-end | 人物左側画像 → track mode | `{"person_position": "left", "action": "turn_left"}` | ✅ PASS (turn_left, detected=True, pos=left) |
+| T4-4 | explore end-to-end | 空間画像 → explore mode | `{"action": "move_forward", "observation": "..."}` | ✅ PASS (move_forward, 1.36s) |
+| T4-5 | 全体レイテンシ | 画像入力 → JSON出力までの時間 | 3秒以内（YOLO+Ollama合計） | ✅ PASS (avg 1.53s, min 1.34s, max 1.68s) |
+| T4-6 | 連続処理（10回） | 同一画像を10回繰り返し処理 | 全回エラーなし・安定したaction | ✅ PASS (0 errors, avg 1.63s) |
+| T4-7 | VRAM同時使用 | YOLO + Ollama 同時ロード時のVRAM | 8GB超過しない | ✅ PASS (6298 MiB / 8188 MiB) |
 
 ### T4 テスト実行スクリプト
 
@@ -286,6 +286,7 @@ Phase 3（負荷）: T6全項目
 | 2026-04-04 | Phase 1 (T2) | 8 / 8 | T2全項目合格 / 要注意: YOLO GPU使用には `.to('cuda')` 明示が必要 |
 | 2026-04-04 | YOLO+Ollama共存 | ✅ | YOLO(GPU)+Ollama同時動作確認 / think=false必須 / 合計1.2〜1.9s |
 | 2026-04-04 | Phase 1 (T3) | 9 / 9 | T3全項目合格 / モデル: qwen3.5:9b-nav / 平均1.26s |
+| 2026-04-04 | Phase 2 (T4) | 7 / 7 | T4全項目合格 / avg 1.53s(T4-5) / 10回連続エラーなし(T4-6) |
 | | Phase 2 | / 12 | |
 | | Phase 3 | / 4  | |
 
