@@ -109,19 +109,29 @@
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
 
-                <!-- llm_nav → YOLO (host call) -->
-                <mxCell id="e15" value="① /camera/image_raw → YOLO" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;fontColor=#9673a6;fontSize=10;" parent="1" source="llm_nav" target="yolo_node" edge="1">
-                    <mxGeometry relative="1" as="geometry"/>
-                </mxCell>
-                <!-- Ollama → llm_nav (JSON response) -->
-                <mxCell id="e16" value="② JSON action response" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;fontColor=#9673a6;fontSize=10;dashed=1;" parent="1" source="lmstudio_model" target="llm_nav" edge="1">
+                <!-- llm_nav → YOLO: 画像データ送信 -->
+                <mxCell id="e15" value="① /camera/image_raw (numpy BGR)" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;fontColor=#9673a6;fontSize=10;fontStyle=1;" parent="1" source="llm_nav" target="yolo_node" edge="1">
                     <mxGeometry relative="1" as="geometry">
                         <Array as="points">
-                            <mxPoint x="1345" y="780"/>
-                            <mxPoint x="660" y="780"/>
-                            <mxPoint x="660" y="680"/>
+                            <mxPoint x="700" y="620"/>
+                            <mxPoint x="1075" y="620"/>
                         </Array>
                     </mxGeometry>
+                </mxCell>
+                <!-- YOLO → Ollama は e_yolo_ollama で定義済み -->
+                <!-- Ollama → llm_nav: JSON action -->
+                <mxCell id="e16" value="③ JSON {action: move_forward|turn_left|...}" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;fontColor=#9673a6;fontSize=10;dashed=1;fontStyle=1;" parent="1" source="lmstudio_model" target="llm_nav" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1345" y="790"/>
+                            <mxPoint x="700" y="790"/>
+                            <mxPoint x="700" y="710"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <!-- YOLO → Ollama ラベル更新 -->
+                <mxCell id="e_yolo_ollama2_label" value="② scene text" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;fontColor=#9673a6;fontSize=10;" parent="1" source="yolo_node" target="lmstudio_model" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
                 <mxCell id="e17" value="/llm_command" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;fontColor=#d6b656;fontSize=10;" parent="1" source="user_node" target="llm_nav" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
@@ -224,8 +234,8 @@
                 </mxCell>
 
                 <!-- LLM Nav -->
-                <mxCell id="llm_nav" value="&lt;b&gt;llm_nav_controller&lt;/b&gt;&lt;br&gt;IN: /camera/image_raw + /llm_command&lt;br&gt;① YOLO yolov8s.pt (RTX 4060 GPU)&lt;br&gt;  → scene description (text)&lt;br&gt;② Ollama qwen3.5:9b → JSON action&lt;br&gt;OUT: /cmd_vel or /goal_pose" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" parent="1" vertex="1">
-                    <mxGeometry x="480" y="595" width="265" height="105" as="geometry"/>
+                <mxCell id="llm_nav" value="&lt;b&gt;llm_nav_controller&lt;/b&gt;&lt;br&gt;[Docker / ROS 2 Node]&lt;br&gt;━━━━━━━━━━━━━━━━━━━━━━━━&lt;br&gt;IN:  /camera/image_raw&lt;br&gt;IN:  /llm_command&lt;br&gt;━━━━━━━━━━━━━━━━━━━━━━━━&lt;br&gt;OUT: /cmd_vel&lt;br&gt;OUT: /goal_pose" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="480" y="580" width="220" height="130" as="geometry"/>
                 </mxCell>
 
                 <!-- Nav2 Stack frame -->
@@ -305,10 +315,6 @@
                     <mxGeometry x="1345" y="640" width="260" height="105" as="geometry"/>
                 </mxCell>
 
-                <!-- Arrow: YOLO → Ollama -->
-                <mxCell id="e_yolo_ollama" value="scene text" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;fontColor=#9673a6;fontSize=10;" parent="1" source="yolo_node" target="lmstudio_model" edge="1">
-                    <mxGeometry relative="1" as="geometry"/>
-                </mxCell>
 
                 <!-- Host note -->
                 <mxCell id="host_note" value="※ YOLO・Ollama はDockerコンテナ外のホストOS上で直接動作&lt;br&gt;llm_nav_controller (Docker) → YOLO (host Python) → Ollama (systemd)" style="text;html=1;strokeColor=none;fillColor=#f9f0ff;align=left;verticalAlign=middle;fontSize=10;rounded=1;" parent="1" vertex="1">
