@@ -109,15 +109,16 @@
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
 
-                <!-- Ollama API -->
-                <mxCell id="e15" value="HTTP API localhost:11434/v1" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;fontColor=#9673a6;fontSize=10;" parent="1" source="llm_nav" target="lmstudio_frame" edge="1">
+                <!-- llm_nav → YOLO (host call) -->
+                <mxCell id="e15" value="① /camera/image_raw → YOLO" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;fontColor=#9673a6;fontSize=10;" parent="1" source="llm_nav" target="yolo_node" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="e16" value="JSON action response" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;fontColor=#9673a6;fontSize=10;dashed=1;" parent="1" source="lmstudio_frame" target="llm_nav" edge="1">
+                <!-- Ollama → llm_nav (JSON response) -->
+                <mxCell id="e16" value="② JSON action response" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;fontColor=#9673a6;fontSize=10;dashed=1;" parent="1" source="lmstudio_model" target="llm_nav" edge="1">
                     <mxGeometry relative="1" as="geometry">
                         <Array as="points">
-                            <mxPoint x="1060" y="750"/>
-                            <mxPoint x="660" y="750"/>
+                            <mxPoint x="1345" y="780"/>
+                            <mxPoint x="660" y="780"/>
                             <mxPoint x="660" y="680"/>
                         </Array>
                     </mxGeometry>
@@ -289,22 +290,34 @@
                     <mxGeometry x="1340" y="450" width="270" height="80" as="geometry"/>
                 </mxCell>
 
-                <!-- Ollama (localhost) -->
-                <mxCell id="lmstudio_frame" value="Ollama (localhost) — RTX 4060 8GB" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;fontStyle=1;verticalAlign=top;align=center;spacingTop=5;" parent="1" vertex="1">
-                    <mxGeometry x="1060" y="605" width="560" height="140" as="geometry"/>
-                </mxCell>
-                <mxCell id="lmstudio_model" value="&lt;b&gt;OpenAI-compatible API  localhost:11434/v1&lt;/b&gt;&lt;br&gt;Model: qwen3.5:9b  (6.6GB, 256K ctx, thinking mode)&lt;br&gt;Input: YOLO scene text + navigation goal (no image)&lt;br&gt;Output: JSON {action: move_forward|turn_left|turn_right|stop|arrived}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" parent="1" vertex="1">
-                    <mxGeometry x="1075" y="645" width="530" height="85" as="geometry"/>
+                <!-- ===== Libra Host System frame ===== -->
+                <mxCell id="lmstudio_frame" value="Libra — Ubuntu 24.04 Host System  (NVIDIA RTX 4060 Laptop 8GB / CUDA 13.0)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e8ff;strokeColor=#9673a6;fontSize=13;fontStyle=1;verticalAlign=top;align=center;spacingTop=5;" parent="1" vertex="1">
+                    <mxGeometry x="1060" y="600" width="560" height="310" as="geometry"/>
                 </mxCell>
 
-                <!-- Foxglove Studio (browser) (NEW) -->
+                <!-- YOLO on host -->
+                <mxCell id="yolo_node" value="&lt;b&gt;YOLO — yolov8s.pt&lt;/b&gt;&lt;br&gt;ultralytics (pip, system-wide)&lt;br&gt;device: cuda:0 (RTX 4060)&lt;br&gt;IN: /camera/image_raw (numpy)&lt;br&gt;OUT: scene description (text)&lt;br&gt;例: &quot;person (center,far), chair (left,close)&quot;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="1075" y="640" width="250" height="105" as="geometry"/>
+                </mxCell>
+
+                <!-- Ollama on host -->
+                <mxCell id="lmstudio_model" value="&lt;b&gt;Ollama — qwen3.5:9b&lt;/b&gt;&lt;br&gt;systemd service (OLLAMA_HOST=0.0.0.0)&lt;br&gt;API: localhost:11434/v1 (OpenAI互換)&lt;br&gt;IN: YOLO scene text + navigation goal&lt;br&gt;OUT: JSON {action: move_forward|turn_left|&lt;br&gt;  turn_right|stop|arrived}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="1345" y="640" width="260" height="105" as="geometry"/>
+                </mxCell>
+
+                <!-- Arrow: YOLO → Ollama -->
+                <mxCell id="e_yolo_ollama" value="scene text" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;fontColor=#9673a6;fontSize=10;" parent="1" source="yolo_node" target="lmstudio_model" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+
+                <!-- Host note -->
+                <mxCell id="host_note" value="※ YOLO・Ollama はDockerコンテナ外のホストOS上で直接動作&lt;br&gt;llm_nav_controller (Docker) → YOLO (host Python) → Ollama (systemd)" style="text;html=1;strokeColor=none;fillColor=#f9f0ff;align=left;verticalAlign=middle;fontSize=10;rounded=1;" parent="1" vertex="1">
+                    <mxGeometry x="1075" y="760" width="530" height="40" as="geometry"/>
+                </mxCell>
+
+                <!-- Foxglove Studio (browser) -->
                 <mxCell id="foxglove_studio" value="&lt;b&gt;Foxglove Studio (Browser)&lt;/b&gt;&lt;br&gt;Connection: Foxglove WebSocket&lt;br&gt;ws://&lt;robot-ip&gt;:8765&lt;br&gt;74 topics: LaserScan / Image / Odometry / Map / TF" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" parent="1" vertex="1">
-                    <mxGeometry x="1060" y="760" width="370" height="90" as="geometry"/>
-                </mxCell>
-
-                <!-- GPU info -->
-                <mxCell id="gpu_note" value="&lt;b&gt;Server GPU: NVIDIA RTX 4060 Laptop 8GB&lt;/b&gt;&lt;br&gt;CUDA 13.0 / Driver 580.126 — runs YOLO + Ollama" style="text;html=1;strokeColor=#9673a6;fillColor=#f9f0ff;align=left;verticalAlign=middle;fontSize=10;rounded=1;" parent="1" vertex="1">
-                    <mxGeometry x="1060" y="870" width="370" height="40" as="geometry"/>
+                    <mxGeometry x="1060" y="930" width="370" height="90" as="geometry"/>
                 </mxCell>
 
                 <!-- Updated note -->
