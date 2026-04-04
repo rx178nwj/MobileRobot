@@ -141,7 +141,8 @@ class LLMNavController(Node):
             if YOLO_AVAILABLE:
                 yolo_model = self.get_parameter('yolo_model').value
                 self.yolo = YOLO(yolo_model)
-                self.get_logger().info(f'YOLO object detection enabled (model: {yolo_model})')
+                self.yolo.to('cuda')  # explicitly use GPU (RTX 4060)
+                self.get_logger().info(f'YOLO object detection enabled (model: {yolo_model}, device: cuda)')
             else:
                 self.get_logger().warn(
                     'use_object_detection=True but ultralytics not installed; '

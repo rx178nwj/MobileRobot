@@ -26,14 +26,14 @@ AIパイプライン:
 
 | ID | テスト項目 | 内容 | 合格基準 | 結果 |
 |----|-----------|------|---------|------|
-| T2-1 | モデルロード | `YOLO('yolov8s.pt')` 起動時間計測 | 3秒以内 | |
-| T2-2 | GPU推論デバイス確認 | `next(model.model.parameters()).device` | `cuda:0` | |
-| T2-3 | ダミー画像推論 | 640×480 黒画像で推論 | エラーなし・完走 | |
-| T2-4 | 推論速度 | 640×480 JPEG 1枚の処理時間 | 50ms以内（GPU） | |
-| T2-5 | 人物検出精度 | 人が写った画像で検出 | `person` クラス検出 | |
-| T2-6 | scene text生成 | `_extract_scene_description()` の出力形式 | `"Detected objects: person (center, far)."` | |
-| T2-7 | 物体なし処理 | 空白画像で推論 | `"No objects detected..."` 返却 | |
-| T2-8 | 信頼度閾値 | `conf=0.3` での検出数 | 誤検出が少ない | |
+| T2-1 | モデルロード | `YOLO('yolov8s.pt')` 起動時間計測 | 3秒以内 | ✅ PASS (2.02s) |
+| T2-2 | GPU推論デバイス確認 | `next(model.model.parameters()).device` | `cuda:0` | ✅ PASS ※要 `.to('cuda')` 明示 |
+| T2-3 | ダミー画像推論 | 640×480 黒画像で推論 | エラーなし・完走 | ✅ PASS |
+| T2-4 | 推論速度 | 640×480 JPEG 1枚の処理時間 | 50ms以内（GPU） | ✅ PASS (avg 7.1ms) |
+| T2-5 | 人物検出精度 | 人が写った画像で検出 | `person` クラス検出 | ✅ PASS (4 persons + bus) |
+| T2-6 | scene text生成 | `_extract_scene_description()` の出力形式 | `"Detected objects: person (center, far)."` | ✅ PASS |
+| T2-7 | 物体なし処理 | 空白画像で推論 | `"No objects detected..."` 返却 | ✅ PASS |
+| T2-8 | 信頼度閾値 | `conf=0.3` での検出数 | 誤検出が少ない | ✅ PASS (0 false positives) |
 
 ### T2 テスト実行スクリプト
 
@@ -283,6 +283,7 @@ Phase 3（負荷）: T6全項目
 | 実施日 | Phase | 合格数 / 総数 | 備考 |
 |--------|-------|-------------|------|
 | 2026-04-04 | Phase 1 (T1) | 6 / 6 | T1全項目合格 |
+| 2026-04-04 | Phase 1 (T2) | 8 / 8 | T2全項目合格 / 要注意: YOLO GPU使用には `.to('cuda')` 明示が必要 |
 | | Phase 2 | / 12 | |
 | | Phase 3 | / 4  | |
 
