@@ -13,12 +13,12 @@ AIパイプライン:
 
 | ID | テスト項目 | 確認コマンド | 合格基準 | 結果 |
 |----|-----------|-------------|---------|------|
-| T1-1 | ultralytics インストール | `python3 -c "from ultralytics import YOLO; print('OK')"` | OK表示 | |
-| T1-2 | openai パッケージ | `python3 -c "from openai import OpenAI; print('OK')"` | OK表示 | |
-| T1-3 | CUDA認識 | `python3 -c "import torch; print(torch.cuda.is_available())"` | `True` | |
-| T1-4 | GPU情報 | `nvidia-smi --query-gpu=name,memory.total --format=csv` | RTX 4060 / 8188MiB | |
-| T1-5 | Ollamaサービス状態 | `systemctl status ollama` | `active (running)` | |
-| T1-6 | Ollama外部公開 | `ss -tlnp \| grep 11434` | `*:11434` | |
+| T1-1 | ultralytics インストール | `python3 -c "from ultralytics import YOLO; print('OK')"` | OK表示 | ✅ PASS |
+| T1-2 | openai パッケージ | `python3 -c "from openai import OpenAI; print('OK')"` | OK表示 | ✅ PASS |
+| T1-3 | CUDA認識 | `python3 -c "import torch; print(torch.cuda.is_available())"` | `True` | ✅ PASS |
+| T1-4 | GPU情報 | `nvidia-smi --query-gpu=name,memory.total --format=csv` | RTX 4060 / 8188MiB | ✅ PASS |
+| T1-5 | Ollamaサービス状態 | `systemctl status ollama` | `active (running)` | ✅ PASS |
+| T1-6 | Ollama外部公開 | `ss -tlnp \| grep 11434` | `*:11434` | ✅ PASS |
 
 ---
 
@@ -282,7 +282,7 @@ Phase 3（負荷）: T6全項目
 
 | 実施日 | Phase | 合格数 / 総数 | 備考 |
 |--------|-------|-------------|------|
-| | Phase 1 | / 13 | |
+| 2026-04-04 | Phase 1 (T1) | 6 / 6 | T1全項目合格 |
 | | Phase 2 | / 12 | |
 | | Phase 3 | / 4  | |
 
