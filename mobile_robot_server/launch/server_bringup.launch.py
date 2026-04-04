@@ -25,14 +25,23 @@ Data flow:
   ③ Nav2 (navigation_launch.py)
         /map + /odom + /goal_pose  →  /cmd_vel
 
-  ④ llm_nav_controller
-        /camera/image_raw + /llm_command  →  /cmd_vel or /goal_pose
+  ④ llm_nav_controller  (YOLO + Ollama)
+        /camera/image_raw  →  YOLO (RTX 4060)  →  scene text
+        scene text + /llm_command  →  Ollama qwen3.5:9b  →  /cmd_vel or /goal_pose
 
   /cmd_vel  →  (rmw_zenoh_cpp)  →  Raspberry Pi  →  motors
 
+AI Pipeline (this host):
+  Edge camera frame
+    └→ YOLO (yolov8s.pt, RTX 4060 GPU)
+         └→ object list + positions (text)
+              └→ Ollama qwen3.5:9b (localhost:11434)
+                   └→ navigation action (JSON)
+
 Usage:
-  # Set API key (OpenAI GPT-4o)
-  export OPENAI_API_KEY="sk-..."
+  # Start Ollama (if not running)
+  ollama serve &
+  ollama run qwen3.5:9b  # preload model
 
   # Build
   cd ~/ros2_ws && colcon build --packages-select mobile_robot_server
@@ -40,6 +49,10 @@ Usage:
 
   # Launch
   ros2 launch mobile_robot_server server_bringup.launch.py
+
+  # Override LLM settings
+  ros2 launch mobile_robot_server server_bringup.launch.py \\
+    llm_base_url:=http://localhost:11434/v1 llm_model:=qwen3.5:9b
 
   # Send LLM command (another terminal)
   ros2 topic pub /llm_command std_msgs/msg/String \\
@@ -81,13 +94,18 @@ def generate_launch_description():
 
     llm_base_url = DeclareLaunchArgument(
         'llm_base_url',
-        default_value=os.environ.get('LLM_BASE_URL', 'http://Nadia.local:1234/v1'),
-        description='LM Studio / OpenAI-compatible API base URL (e.g. http://192.168.1.5:1234/v1)')
+        default_value=os.environ.get('LLM_BASE_URL', 'http://localhost:11434/v1'),
+        description='Ollama / OpenAI-compatible API base URL (default: local Ollama)')
 
     llm_model = DeclareLaunchArgument(
         'llm_model',
-        default_value=os.environ.get('LLM_MODEL', 'openai/gpt-oss-20b'),
-        description='Model name to use for LLM navigation')
+        default_value=os.environ.get('LLM_MODEL', 'qwen3.5:9b'),
+        description='Ollama model name (default: qwen3.5:9b)')
+
+    yolo_model = DeclareLaunchArgument(
+        'yolo_model',
+        default_value=os.environ.get('YOLO_MODEL', 'yolov8s.pt'),
+        description='YOLO model file (yolov8n.pt / yolov8s.pt / yolov8m.pt)')
 
     # ------------------------------------------------------------------
     # Edge bridge nodes  (connect to edge_services via WebSocket)
@@ -352,13 +370,18 @@ def generate_launch_description():
         name='llm_nav_controller',
         output='screen',
         parameters=[{
-            'openai_api_key': os.environ.get('OPENAI_API_KEY', 'local'),
-            'llm_base_url':   LaunchConfiguration('llm_base_url'),
-            'model':          LaunchConfiguration('llm_model'),
-            'llm_interval':   LaunchConfiguration('llm_interval'),
-            'linear_speed':   LaunchConfiguration('linear_speed'),
-            'angular_speed':  LaunchConfiguration('angular_speed'),
-            'use_sim_time':   LaunchConfiguration('use_sim_time'),
+            'openai_api_key':      os.environ.get('OPENAI_API_KEY', 'ollama'),
+            'llm_base_url':        LaunchConfiguration('llm_base_url'),
+            'model':               LaunchConfiguration('llm_model'),
+            'llm_interval':        LaunchConfiguration('llm_interval'),
+            'linear_speed':        LaunchConfiguration('linear_speed'),
+            'angular_speed':       LaunchConfiguration('angular_speed'),
+            'use_sim_time':        LaunchConfiguration('use_sim_time'),
+            # YOLO + Ollama pipeline: disable direct image send, enable YOLO text pipeline
+            'vision_enabled':      False,
+            'use_object_detection': True,
+            'yolo_model':          LaunchConfiguration('yolo_model'),
+            'yolo_conf':           0.3,
         }],
     )
 
@@ -371,6 +394,7 @@ def generate_launch_description():
         lidar_port,
         llm_base_url,
         llm_model,
+        yolo_model,
         robot_state_pub,
         ws_motor,
         ws_odom,

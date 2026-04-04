@@ -2,7 +2,12 @@
 """
 LLM Navigation Controller
 
-Connects OpenAI GPT-4o vision to ROS 2 navigation.
+AI pipeline:
+  Edge camera frame
+    └→ YOLO (server GPU, yolov8s.pt)  — object detection
+         └→ scene description (text)
+              └→ Ollama qwen3.5:9b (localhost:11434)  — navigation decision
+                   └→ ROS 2 /cmd_vel or /goal_pose
 
 Modes (set via /llm_command topic, JSON payload):
   navigate  - Move toward a text-described goal, avoiding obstacles
@@ -24,8 +29,10 @@ Subscribed topics:
   /llm_command       (std_msgs/String)
   /odom              (nav_msgs/Odometry)
 
-Environment variable:
-  OPENAI_API_KEY   — required for GPT-4o calls
+Environment variables:
+  LLM_BASE_URL   — Ollama endpoint (default: http://localhost:11434/v1)
+  LLM_MODEL      — model name (default: qwen3.5:9b)
+  YOLO_MODEL     — YOLO weights (default: yolov8s.pt)
 """
 
 import base64
@@ -103,17 +110,17 @@ class LLMNavController(Node):
         super().__init__('llm_nav_controller')
 
         # ---- Parameters ----
-        self.declare_parameter('openai_api_key', os.environ.get('OPENAI_API_KEY', 'local'))
-        self.declare_parameter('llm_base_url', os.environ.get('LLM_BASE_URL', ''))
-        self.declare_parameter('model', 'gpt-4o')
+        self.declare_parameter('openai_api_key', os.environ.get('OPENAI_API_KEY', 'ollama'))
+        self.declare_parameter('llm_base_url', os.environ.get('LLM_BASE_URL', 'http://localhost:11434/v1'))
+        self.declare_parameter('model', os.environ.get('LLM_MODEL', 'qwen3.5:9b'))
         self.declare_parameter('llm_interval', 2.0)   # seconds between LLM calls
         self.declare_parameter('linear_speed', 0.25)  # m/s forward
         self.declare_parameter('angular_speed', 0.5)  # rad/s turning
         self.declare_parameter('jpeg_quality', 70)
         self.declare_parameter('max_image_width', 480)
-        self.declare_parameter('vision_enabled', True)
-        self.declare_parameter('use_object_detection', False)
-        self.declare_parameter('yolo_model', 'yolov8n.pt')
+        self.declare_parameter('vision_enabled', False)         # Ollama text-only; use YOLO instead
+        self.declare_parameter('use_object_detection', True)    # YOLO on server GPU
+        self.declare_parameter('yolo_model', os.environ.get('YOLO_MODEL', 'yolov8s.pt'))
         self.declare_parameter('yolo_conf', 0.3)
 
         api_key = self.get_parameter('openai_api_key').value
