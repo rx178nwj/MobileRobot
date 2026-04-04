@@ -112,7 +112,7 @@ class LLMNavController(Node):
         # ---- Parameters ----
         self.declare_parameter('openai_api_key', os.environ.get('OPENAI_API_KEY', 'ollama'))
         self.declare_parameter('llm_base_url', os.environ.get('LLM_BASE_URL', 'http://localhost:11434/v1'))
-        self.declare_parameter('model', os.environ.get('LLM_MODEL', 'qwen3.5:9b'))
+        self.declare_parameter('model', os.environ.get('LLM_MODEL', 'qwen3.5:9b-nav'))  # thinking disabled, num_ctx=2048
         self.declare_parameter('llm_interval', 2.0)   # seconds between LLM calls
         self.declare_parameter('linear_speed', 0.25)  # m/s forward
         self.declare_parameter('angular_speed', 0.5)  # rad/s turning
@@ -338,6 +338,7 @@ class LLMNavController(Node):
             ],
             max_tokens=2000,
             temperature=0.1,
+            extra_body={'think': False, 'options': {'num_ctx': 2048}},
         )
         msg = response.choices[0].message
         raw = (msg.content or '').strip()

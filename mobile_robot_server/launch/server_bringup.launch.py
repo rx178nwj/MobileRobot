@@ -99,8 +99,8 @@ def generate_launch_description():
 
     llm_model = DeclareLaunchArgument(
         'llm_model',
-        default_value=os.environ.get('LLM_MODEL', 'qwen3.5:9b'),
-        description='Ollama model name (default: qwen3.5:9b)')
+        default_value=os.environ.get('LLM_MODEL', 'qwen3.5:9b-nav'),
+        description='Ollama model name (default: qwen3.5:9b-nav, thinking disabled)')
 
     yolo_model = DeclareLaunchArgument(
         'yolo_model',
