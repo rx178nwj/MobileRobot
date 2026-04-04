@@ -109,11 +109,11 @@
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
 
-                <!-- LLM API -->
-                <mxCell id="e15" value="HTTP OpenAI API" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;fontColor=#9673a6;fontSize=10;" parent="1" source="llm_nav" target="lmstudio_frame" edge="1">
+                <!-- Ollama API -->
+                <mxCell id="e15" value="HTTP API localhost:11434/v1" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;fontColor=#9673a6;fontSize=10;" parent="1" source="llm_nav" target="lmstudio_frame" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="e16" value="JSON response" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;fontColor=#9673a6;fontSize=10;dashed=1;" parent="1" source="lmstudio_frame" target="llm_nav" edge="1">
+                <mxCell id="e16" value="JSON action response" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;fontColor=#9673a6;fontSize=10;dashed=1;" parent="1" source="lmstudio_frame" target="llm_nav" edge="1">
                     <mxGeometry relative="1" as="geometry">
                         <Array as="points">
                             <mxPoint x="1060" y="750"/>
@@ -223,8 +223,8 @@
                 </mxCell>
 
                 <!-- LLM Nav -->
-                <mxCell id="llm_nav" value="&lt;b&gt;llm_nav_controller&lt;/b&gt;&lt;br&gt;IN: /camera/image_raw + /llm_command&lt;br&gt;Vision analysis → LLM API&lt;br&gt;(base_url: http://Nadia.local:1234/v1)&lt;br&gt;OUT: /cmd_vel or /goal_pose" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" parent="1" vertex="1">
-                    <mxGeometry x="480" y="605" width="265" height="90" as="geometry"/>
+                <mxCell id="llm_nav" value="&lt;b&gt;llm_nav_controller&lt;/b&gt;&lt;br&gt;IN: /camera/image_raw + /llm_command&lt;br&gt;① YOLO yolov8s.pt (RTX 4060 GPU)&lt;br&gt;  → scene description (text)&lt;br&gt;② Ollama qwen3.5:9b → JSON action&lt;br&gt;OUT: /cmd_vel or /goal_pose" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="480" y="595" width="265" height="105" as="geometry"/>
                 </mxCell>
 
                 <!-- Nav2 Stack frame -->
@@ -272,7 +272,7 @@
                 <mxCell id="flow_frame" value="Key Topic &amp; Data Flow" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=12;fontStyle=1;verticalAlign=top;align=center;spacingTop=5;" parent="1" vertex="1">
                     <mxGeometry x="1060" y="80" width="560" height="355" as="geometry"/>
                 </mxCell>
-                <mxCell id="flow_text" value="&lt;b&gt;Sensor Input&lt;/b&gt;&lt;br&gt;• YDLIDAR T-mini → /scan  (BEST_EFFORT, 10Hz, 360°)&lt;br&gt;• IMX708 → camera_service :8003 → ws_camera_bridge&lt;br&gt;  → /camera/image_raw/compressed&lt;br&gt;  → image_decompress → /camera/image_raw&lt;br&gt;• PR2040 encoders → odom_service :8002 → ws_odom_pub&lt;br&gt;  → /odom  +  TF(odom → base_footprint)&lt;br&gt;&lt;br&gt;&lt;b&gt;SLAM (2D LiDAR + Odometry)&lt;/b&gt;&lt;br&gt;• /scan (BEST_EFFORT) + /odom → slam_toolbox&lt;br&gt;• slam_toolbox → /map (OccupancyGrid, 5cm resolution)&lt;br&gt;• slam_toolbox → TF(map → odom)&lt;br&gt;• lifecycle_manager_slam activates node (bond_timeout=0)&lt;br&gt;&lt;br&gt;&lt;b&gt;Navigation&lt;/b&gt;&lt;br&gt;• /map + /goal_pose → bt_navigator → controller_server&lt;br&gt;• controller_server → /cmd_vel_nav&lt;br&gt;• velocity_smoother → /cmd_vel_smoothed&lt;br&gt;• collision_monitor (/scan, min_range 0.15m) → /cmd_vel&lt;br&gt;&lt;br&gt;&lt;b&gt;Autonomous Mapping&lt;/b&gt;&lt;br&gt;• /map frontier detection → /navigate_to_pose action&lt;br&gt;• /mapping/status (coverage%, stuck_timeout=60s)&lt;br&gt;&lt;br&gt;&lt;b&gt;LLM Navigation&lt;/b&gt;&lt;br&gt;• /llm_command + /camera/image_raw → llm_nav_controller&lt;br&gt;• → LM Studio API (Nadia.local:1234/v1)&lt;br&gt;• JSON {action, linear_x, angular_z} → /cmd_vel or /goal_pose&lt;br&gt;&lt;br&gt;&lt;b&gt;Motor Output&lt;/b&gt;&lt;br&gt;• /cmd_vel → ws_motor_controller → WS :8001&lt;br&gt;• → motor_service → PR2040 PWM L/R" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=11;spacingLeft=10;" parent="1" vertex="1">
+                <mxCell id="flow_text" value="&lt;b&gt;Sensor Input&lt;/b&gt;&lt;br&gt;• YDLIDAR T-mini → /scan  (BEST_EFFORT, 10Hz, 360°)&lt;br&gt;• IMX708 → camera_service :8003 → ws_camera_bridge&lt;br&gt;  → /camera/image_raw/compressed&lt;br&gt;  → image_decompress → /camera/image_raw&lt;br&gt;• PR2040 encoders → odom_service :8002 → ws_odom_pub&lt;br&gt;  → /odom  +  TF(odom → base_footprint)&lt;br&gt;&lt;br&gt;&lt;b&gt;SLAM (2D LiDAR + Odometry)&lt;/b&gt;&lt;br&gt;• /scan (BEST_EFFORT) + /odom → slam_toolbox&lt;br&gt;• slam_toolbox → /map (OccupancyGrid, 5cm resolution)&lt;br&gt;• slam_toolbox → TF(map → odom)&lt;br&gt;• lifecycle_manager_slam activates node (bond_timeout=0)&lt;br&gt;&lt;br&gt;&lt;b&gt;Navigation&lt;/b&gt;&lt;br&gt;• /map + /goal_pose → bt_navigator → controller_server&lt;br&gt;• controller_server → /cmd_vel_nav&lt;br&gt;• velocity_smoother → /cmd_vel_smoothed&lt;br&gt;• collision_monitor (/scan, min_range 0.15m) → /cmd_vel&lt;br&gt;&lt;br&gt;&lt;b&gt;Autonomous Mapping&lt;/b&gt;&lt;br&gt;• /map frontier detection → /navigate_to_pose action&lt;br&gt;• /mapping/status (coverage%, stuck_timeout=60s)&lt;br&gt;&lt;br&gt;&lt;b&gt;AI Navigation Pipeline (YOLO + Ollama)&lt;/b&gt;&lt;br&gt;• /camera/image_raw → YOLO yolov8s.pt (RTX 4060)&lt;br&gt;  → scene text: "person (center,far), chair (left,close)"&lt;br&gt;• scene text + /llm_command → Ollama qwen3.5:9b&lt;br&gt;  → localhost:11434/v1 (no cloud, fully local)&lt;br&gt;• JSON {action} → /cmd_vel or /goal_pose&lt;br&gt;&lt;br&gt;&lt;b&gt;Motor Output&lt;/b&gt;&lt;br&gt;• /cmd_vel → ws_motor_controller → WS :8001&lt;br&gt;• → motor_service → PR2040 PWM L/R" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=11;spacingLeft=10;" parent="1" vertex="1">
                     <mxGeometry x="1068" y="110" width="540" height="315" as="geometry"/>
                 </mxCell>
 
@@ -289,11 +289,11 @@
                     <mxGeometry x="1340" y="450" width="270" height="80" as="geometry"/>
                 </mxCell>
 
-                <!-- LM Studio -->
-                <mxCell id="lmstudio_frame" value="LM Studio (Nadia.local)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;fontStyle=1;verticalAlign=top;align=center;spacingTop=5;" parent="1" vertex="1">
+                <!-- Ollama (localhost) -->
+                <mxCell id="lmstudio_frame" value="Ollama (localhost) — RTX 4060 8GB" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;fontStyle=1;verticalAlign=top;align=center;spacingTop=5;" parent="1" vertex="1">
                     <mxGeometry x="1060" y="605" width="560" height="140" as="geometry"/>
                 </mxCell>
-                <mxCell id="lmstudio_model" value="&lt;b&gt;OpenAI-compatible API  :1234/v1&lt;/b&gt;&lt;br&gt;URL: configurable via --llm_base_url launch arg&lt;br&gt;Default: http://Nadia.local:1234/v1&lt;br&gt;Request: image + prompt → JSON {action, linear_x, angular_z}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" parent="1" vertex="1">
+                <mxCell id="lmstudio_model" value="&lt;b&gt;OpenAI-compatible API  localhost:11434/v1&lt;/b&gt;&lt;br&gt;Model: qwen3.5:9b  (6.6GB, 256K ctx, thinking mode)&lt;br&gt;Input: YOLO scene text + navigation goal (no image)&lt;br&gt;Output: JSON {action: move_forward|turn_left|turn_right|stop|arrived}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="1075" y="645" width="530" height="85" as="geometry"/>
                 </mxCell>
 
@@ -302,8 +302,13 @@
                     <mxGeometry x="1060" y="760" width="370" height="90" as="geometry"/>
                 </mxCell>
 
+                <!-- GPU info -->
+                <mxCell id="gpu_note" value="&lt;b&gt;Server GPU: NVIDIA RTX 4060 Laptop 8GB&lt;/b&gt;&lt;br&gt;CUDA 13.0 / Driver 580.126 — runs YOLO + Ollama" style="text;html=1;strokeColor=#9673a6;fillColor=#f9f0ff;align=left;verticalAlign=middle;fontSize=10;rounded=1;" parent="1" vertex="1">
+                    <mxGeometry x="1060" y="870" width="370" height="40" as="geometry"/>
+                </mxCell>
+
                 <!-- Updated note -->
-                <mxCell id="updated" value="Updated: 2026-03-29" style="text;html=1;strokeColor=none;fillColor=none;align=right;verticalAlign=middle;fontSize=10;fontStyle=2;fontColor=#666666;" parent="1" vertex="1">
+                <mxCell id="updated" value="Updated: 2026-04-04" style="text;html=1;strokeColor=none;fillColor=none;align=right;verticalAlign=middle;fontSize=10;fontStyle=2;fontColor=#666666;" parent="1" vertex="1">
                     <mxGeometry x="1440" y="1120" width="180" height="20" as="geometry"/>
                 </mxCell>
 
