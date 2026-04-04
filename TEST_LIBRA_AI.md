@@ -78,15 +78,15 @@ python3 test_yolo.py
 
 | ID | テスト項目 | 内容 | 合格基準 | 結果 |
 |----|-----------|------|---------|------|
-| T3-1 | API疎通（ローカル） | `curl localhost:11434/api/tags` | `qwen3.5:9b` 表示 | |
-| T3-2 | API疎通（外部） | 他PCから `curl 192.168.10.35:11434/api/tags` | `qwen3.5:9b` 表示 | |
-| T3-3 | モデルロード時間 | 初回推論のレスポンス時間 | 10秒以内 | |
-| T3-4 | navigate応答形式 | navigate用プロンプト送信 | `{"action": "...", "reason": "..."}` | |
-| T3-5 | track応答形式 | track用プロンプト送信 | `{"action":..., "person_detected":..., "person_position":...}` | |
-| T3-6 | explore応答形式 | explore用プロンプト送信 | `{"action":..., "observation":...}` | |
-| T3-7 | thinking除去 | `<think>...</think>` ブロックの除去処理 | JSONのみ返却 | |
-| T3-8 | 推論速度 | scene text → JSON action の応答時間 | 2秒以内 | |
-| T3-9 | VRAM使用量 | `ollama ps` + `nvidia-smi` | 8GB以内 | |
+| T3-1 | API疎通（ローカル） | `curl localhost:11434/api/tags` | `qwen3.5:9b` 表示 | ✅ PASS (qwen3.5:9b-nav, qwen3.5:9b, gemma4:e2b) |
+| T3-2 | API疎通（外部） | 他PCから `curl 192.168.10.35:11434/api/tags` | `qwen3.5:9b` 表示 | ✅ PASS |
+| T3-3 | モデルロード時間 | 初回推論のレスポンス時間 | 10秒以内 | ✅ PASS (1.75s) |
+| T3-4 | navigate応答形式 | navigate用プロンプト送信 | `{"action": "...", "reason": "..."}` | ✅ PASS (action=stop, 1.77s) |
+| T3-5 | track応答形式 | track用プロンプト送信 | `{"action":..., "person_detected":..., "person_position":...}` | ✅ PASS (turn_left, left, 1.64s) |
+| T3-6 | explore応答形式 | explore用プロンプト送信 | `{"action":..., "observation":...}` | ✅ PASS (move_forward, 1.55s) |
+| T3-7 | thinking除去 | `<think>...</think>` ブロックの除去処理 | JSONのみ返却 | ✅ PASS (think=false: contentに直接JSON / think=true: thinkingフィールドに分離) |
+| T3-8 | 推論速度 | scene text → JSON action の応答時間 | 2秒以内 | ✅ PASS (avg 1.26s, min 0.94s, max 1.55s) |
+| T3-9 | VRAM使用量 | `ollama ps` + `nvidia-smi` | 8GB以内 | ✅ PASS (6059 MiB / 8188 MiB) |
 
 ### T3 テスト実行スクリプト
 
@@ -285,6 +285,7 @@ Phase 3（負荷）: T6全項目
 | 2026-04-04 | Phase 1 (T1) | 6 / 6 | T1全項目合格 |
 | 2026-04-04 | Phase 1 (T2) | 8 / 8 | T2全項目合格 / 要注意: YOLO GPU使用には `.to('cuda')` 明示が必要 |
 | 2026-04-04 | YOLO+Ollama共存 | ✅ | YOLO(GPU)+Ollama同時動作確認 / think=false必須 / 合計1.2〜1.9s |
+| 2026-04-04 | Phase 1 (T3) | 9 / 9 | T3全項目合格 / モデル: qwen3.5:9b-nav / 平均1.26s |
 | | Phase 2 | / 12 | |
 | | Phase 3 | / 4  | |
 
