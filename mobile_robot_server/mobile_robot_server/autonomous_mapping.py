@@ -44,6 +44,7 @@ import base64
 import json
 import math
 import re
+import os
 import threading
 import time
 from typing import List, Optional, Tuple
@@ -154,9 +155,11 @@ class AutonomousMapper(Node):
 
         # Parameters
         self.declare_parameter('llm_base_url',
-                               'http://Nadia.local:1234/v1')
-        self.declare_parameter('llm_model', 'openai/gpt-oss-20b')
-        self.declare_parameter('openai_api_key', 'local')
+                               os.environ.get('LLM_BASE_URL', 'http://localhost:11434/v1'))
+        self.declare_parameter('llm_model',
+                               os.environ.get('LLM_MODEL', 'qwen3.5:9b'))
+        self.declare_parameter('openai_api_key',
+                               os.environ.get('OPENAI_API_KEY', 'ollama'))
         self.declare_parameter('exploration_timeout', 0.0)   # 0 = unlimited
         self.declare_parameter('nav_timeout',          60.0)
         self.declare_parameter('stuck_timeout',        60.0)

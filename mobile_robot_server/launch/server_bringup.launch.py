@@ -363,6 +363,7 @@ def generate_launch_description():
     # ④ LLM Navigation Controller
     #    Subscribes: /camera/image_raw, /llm_command
     #    Publishes:  /cmd_vel (direct), /goal_pose (→ Nav2)
+    #    Pipeline: YOLO yolov8s.pt → scene text → Ollama qwen3.5:9b → JSON action
     # ------------------------------------------------------------------
     llm_nav = Node(
         package='mobile_robot_server',
@@ -382,6 +383,48 @@ def generate_launch_description():
             'use_object_detection': True,
             'yolo_model':          LaunchConfiguration('yolo_model'),
             'yolo_conf':           0.3,
+        }],
+    )
+
+    # ------------------------------------------------------------------
+    # ⑤ Autonomous Mapping
+    #    Subscribes: /map, /odom, /mapping/stop
+    #                /camera/image_raw/compressed (optional)
+    #    Action client: navigate_to_pose
+    #    Publishes: /mapping/status
+    # ------------------------------------------------------------------
+    autonomous_mapping = Node(
+        package='mobile_robot_server',
+        executable='autonomous_mapping',
+        name='autonomous_mapping',
+        output='screen',
+        parameters=[{
+            'llm_base_url':        LaunchConfiguration('llm_base_url'),
+            'llm_model':           LaunchConfiguration('llm_model'),
+            'openai_api_key':      os.environ.get('OPENAI_API_KEY', 'ollama'),
+            'stuck_timeout':       60.0,
+            'nav_timeout':         60.0,
+            'min_frontier_size':   10,
+            'use_sim_time':        LaunchConfiguration('use_sim_time'),
+        }],
+    )
+
+    # ------------------------------------------------------------------
+    # ⑥ Foxglove Bridge
+    #    WebSocket :8765 → Foxglove Studio (browser)
+    #    Advertises all active ROS2 topics
+    # ------------------------------------------------------------------
+    foxglove_bridge = Node(
+        package='foxglove_bridge',
+        executable='foxglove_bridge',
+        name='foxglove_bridge',
+        output='screen',
+        parameters=[{
+            'port':                8765,
+            'address':             '0.0.0.0',
+            'tls':                 False,
+            'topic_whitelist':     ['.*'],
+            'use_sim_time':        LaunchConfiguration('use_sim_time'),
         }],
     )
 
@@ -405,4 +448,6 @@ def generate_launch_description():
         lifecycle_manager_slam,
         nav2,
         llm_nav,
+        autonomous_mapping,
+        foxglove_bridge,
     ])
