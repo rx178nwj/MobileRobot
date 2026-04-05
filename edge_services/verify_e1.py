@@ -57,12 +57,24 @@ async def main():
     print(f'  {SEP}')
     print(f'  [2] ファームウェア応答確認 (get_status)')
     print(f'  {SEP}')
+    async def drain(ws):
+        """Drain all buffered odom messages."""
+        for _ in range(100):
+            try:
+                await asyncio.wait_for(ws.recv(), timeout=0.001)
+            except asyncio.TimeoutError:
+                break
+
     status = None
     try:
         async with websockets.connect(ODOM_URI, open_timeout=2.0) as ws:
             await ws.recv()  # initial odom msg
+            await drain(ws)
             await ws.send(json.dumps({'type': 'get_status'}))
-            resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=2.0))
+            for _ in range(20):
+                resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=2.0))
+                if resp.get('type') == 'status':
+                    break
             if resp.get('type') == 'status' and 'data' in resp:
                 status = resp['data']
                 print(f'  {PASS}: ファームウェアが応答しました')
@@ -110,14 +122,6 @@ async def main():
     print(f'  [4] ファームウェアタイムスタンプ進行確認 (自動送信 100Hz)')
     print(f'  {SEP}')
     try:
-        async def drain(ws):
-            """Drain all buffered odom messages."""
-            for _ in range(100):
-                try:
-                    await asyncio.wait_for(ws.recv(), timeout=0.001)
-                except asyncio.TimeoutError:
-                    break
-
         async def get_status_ts(ws) -> int:
             """Drain buffer, send get_status, return firmware timestamp."""
             await drain(ws)
