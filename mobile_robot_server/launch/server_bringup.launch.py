@@ -63,7 +63,7 @@ Usage:
 """
 
 import os
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction
 from launch.substitutions import LaunchConfiguration
@@ -414,19 +414,28 @@ def generate_launch_description():
     #    WebSocket :8765 → Foxglove Studio (browser)
     #    Advertises all active ROS2 topics
     # ------------------------------------------------------------------
-    foxglove_bridge = Node(
-        package='foxglove_bridge',
-        executable='foxglove_bridge',
-        name='foxglove_bridge',
-        output='screen',
-        parameters=[{
-            'port':                8765,
-            'address':             '0.0.0.0',
-            'tls':                 False,
-            'topic_whitelist':     ['.*'],
-            'use_sim_time':        LaunchConfiguration('use_sim_time'),
-        }],
-    )
+    # foxglove_bridge はオプション — パッケージが未インストールの場合はスキップ
+    try:
+        get_package_share_directory('foxglove_bridge')
+        foxglove_bridge = Node(
+            package='foxglove_bridge',
+            executable='foxglove_bridge',
+            name='foxglove_bridge',
+            output='screen',
+            parameters=[{
+                'port':                8765,
+                'address':             '0.0.0.0',
+                'tls':                 False,
+                'topic_whitelist':     ['.*'],
+                'use_sim_time':        LaunchConfiguration('use_sim_time'),
+            }],
+        )
+        optional_nodes = [foxglove_bridge]
+    except PackageNotFoundError:
+        import logging
+        logging.getLogger('launch').warning(
+            'foxglove_bridge not found — skipping Foxglove Bridge node')
+        optional_nodes = []
 
     return LaunchDescription([
         use_sim_time,
@@ -449,5 +458,5 @@ def generate_launch_description():
         nav2,
         llm_nav,
         autonomous_mapping,
-        foxglove_bridge,
+        *optional_nodes,
     ])
