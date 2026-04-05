@@ -59,6 +59,12 @@ except ImportError:
     OPENAI_AVAILABLE = False
 
 try:
+    import ollama as _ollama_pkg
+    OLLAMA_PKG_AVAILABLE = True
+except ImportError:
+    OLLAMA_PKG_AVAILABLE = False
+
+try:
     from ultralytics import YOLO
     YOLO_AVAILABLE = True
 except Exception:
@@ -112,7 +118,7 @@ class LLMNavController(Node):
         # ---- Parameters ----
         self.declare_parameter('openai_api_key', os.environ.get('OPENAI_API_KEY', 'ollama'))
         self.declare_parameter('llm_base_url', os.environ.get('LLM_BASE_URL', 'http://localhost:11434/v1'))
-        self.declare_parameter('model', os.environ.get('LLM_MODEL', 'qwen3.5:9b-nav'))  # thinking disabled, num_ctx=2048
+        self.declare_parameter('model', os.environ.get('LLM_MODEL', 'qwen3.5:9b-nav'))  # thinking disabled, num_ctx=1024
         self.declare_parameter('llm_interval', 2.0)   # seconds between LLM calls
         self.declare_parameter('linear_speed', 0.25)  # m/s forward
         self.declare_parameter('angular_speed', 0.5)  # rad/s turning
@@ -149,15 +155,24 @@ class LLMNavController(Node):
                     'falling back to edge-based scene analysis'
                 )
 
-        if not OPENAI_AVAILABLE:
-            self.get_logger().error('openai package not installed — run: pip install openai')
+        # Ollama native client (preferred: supports think=False reliably)
+        # Detect Ollama by checking if base_url contains the Ollama default port
+        self._ollama_client = None
+        if OLLAMA_PKG_AVAILABLE and base_url and '11434' in base_url:
+            ollama_host = base_url.replace('/v1', '').rstrip('/')
+            self._ollama_client = _ollama_pkg.Client(host=ollama_host)
+            self.get_logger().info(
+                f'Ollama native client ready (model: {self.model}, host: {ollama_host})'
+            )
+        elif not OPENAI_AVAILABLE:
+            self.get_logger().error('Neither ollama nor openai package available — run: pip install ollama')
         else:
             client_kwargs = {'api_key': api_key or 'local'}
             if base_url:
                 client_kwargs['base_url'] = base_url
             self.llm_client = OpenAI(**client_kwargs)
             self.get_logger().info(
-                f'LLM client ready (model: {self.model}, base_url: {base_url or "openai default"})'
+                f'LLM OpenAI-compat client ready (model: {self.model}, base_url: {base_url or "openai default"})'
             )
 
         self.bridge = CvBridge()
@@ -330,21 +345,34 @@ class LLMNavController(Node):
         else:
             user_content = f'/no_think {user}'
 
-        response = self.llm_client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {'role': 'system', 'content': system},
-                {'role': 'user', 'content': user_content},
-            ],
-            max_tokens=2000,
-            temperature=0.1,
-            extra_body={'think': False, 'options': {'num_ctx': 2048}},
-        )
-        msg = response.choices[0].message
-        raw = (msg.content or '').strip()
-        # Qwen3 thinking mode: answer may be in reasoning_content when content is empty
-        if not raw:
-            raw = (getattr(msg, 'reasoning_content', None) or '').strip()
+        if self._ollama_client is not None:
+            # Ollama native API: think=False is reliably applied here
+            response = self._ollama_client.chat(
+                model=self.model,
+                messages=[
+                    {'role': 'system', 'content': system},
+                    {'role': 'user', 'content': user_content},
+                ],
+                think=False,
+                options={'num_ctx': 1024, 'temperature': 0.1},
+            )
+            raw = (response.message.content or '').strip()
+        else:
+            response = self.llm_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {'role': 'system', 'content': system},
+                    {'role': 'user', 'content': user_content},
+                ],
+                max_tokens=2000,
+                temperature=0.1,
+                extra_body={'think': False, 'options': {'num_ctx': 1024}},
+            )
+            msg = response.choices[0].message
+            raw = (msg.content or '').strip()
+            # Qwen3 thinking mode: answer may be in reasoning_content when content is empty
+            if not raw:
+                raw = (getattr(msg, 'reasoning_content', None) or '').strip()
         self.get_logger().info(f'LLM raw: {raw[:300]}')
         # Strip <think>...</think> blocks
         if '<think>' in raw:

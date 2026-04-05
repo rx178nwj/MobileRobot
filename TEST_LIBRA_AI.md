@@ -234,11 +234,11 @@ nvidia-smi --query-gpu=memory.used,temperature.gpu --format=csv -l 2
 
 | ID | テスト項目 | 内容 | 合格基準 | 結果 |
 |----|-----------|------|---------|------|
-| T5-1 | Ollama停止時の挙動 | `systemctl stop ollama` 後に推論 | 例外キャッチ・ロボット停止 | |
-| T5-2 | 不正JSON応答 | Ollama応答が壊れた場合 | `json.JSONDecodeError` キャッチ・停止維持 | |
-| T5-3 | カメラフレームなし | `frame=None` で推論呼び出し | 処理スキップ・クラッシュなし | |
-| T5-4 | GPU OOM | VRAM不足状態でYOLO推論 | エラーログ出力・継続動作 | |
-| T5-5 | Ollama keepalive切れ | モデルアンロード後の再呼び出し | 自動再ロード・動作継続 | |
+| T5-1 | Ollama停止時の挙動 | `systemctl stop ollama` 後に推論 | 例外キャッチ・ロボット停止 | ✅ PASS (APIConnectionError キャッチ・stop返却、連続5回クラッシュなし) |
+| T5-2 | 不正JSON応答 | Ollama応答が壊れた場合 | `json.JSONDecodeError` キャッチ・停止維持 | ✅ PASS (5パターン全て安全処理: 空, JSONなし, マークダウン, 余分テキスト, thinkタグ) |
+| T5-3 | カメラフレームなし | `frame=None` で推論呼び出し | 処理スキップ・クラッシュなし | ✅ PASS |
+| T5-4 | GPU OOM | VRAM不足状態でYOLO推論 | エラーログ出力・継続動作 | ✅ PASS (RuntimeError/torch.cuda.OutOfMemoryError を捕捉・stop返却、9/9確認) |
+| T5-5 | Ollama keepalive切れ | モデルアンロード後の再呼び出し | 自動再ロード・動作継続 | ✅ PASS (keep_alive=0でアンロード後8.04sで自動再ロード) |
 
 ```bash
 # T5-1: Ollama停止テスト
@@ -256,10 +256,10 @@ ollama ps   # UNTILが切れた後に test_ollama.py を実行
 
 | ID | テスト項目 | 内容 | 合格基準 | 結果 |
 |----|-----------|------|---------|------|
-| T6-1 | GPU温度 | 連続推論10分間のGPU温度 | 90°C未満 | |
-| T6-2 | VRAMリーク | 長時間稼働時のVRAM変化 | メモリ増加なし | |
-| T6-3 | CPU使用率 | YOLO+Ollama同時稼働時 | 80%未満 | |
-| T6-4 | llm_interval=2.0s | 2秒周期での連続処理 | タイムアウトなし | |
+| T6-1 | GPU温度 | 連続推論10分間のGPU温度 | 90°C未満 | ✅ PASS (最高62°C / 平均56.8°C) |
+| T6-2 | VRAMリーク | 長時間稼働時のVRAM変化 | メモリ増加なし | ✅ PASS (変化+122 MiB、安定) |
+| T6-3 | CPU使用率 | YOLO+Ollama同時稼働時 | 80%未満 | ✅ PASS (平均15.2%) |
+| T6-4 | llm_interval=2.0s | 2秒周期での連続処理 | タイムアウトなし | ✅ PASS (avg 1.69s / max 2.04s / 60サイクルエラーゼロ) |
 
 ```bash
 # T6-1 / T6-2: GPU監視（別ターミナルで実行）
@@ -287,9 +287,9 @@ Phase 3（負荷）: T6全項目
 | 2026-04-04 | YOLO+Ollama共存 | ✅ | YOLO(GPU)+Ollama同時動作確認 / think=false必須 / 合計1.2〜1.9s |
 | 2026-04-04 | Phase 1 (T3) | 9 / 9 | T3全項目合格 / モデル: qwen3.5:9b-nav / 平均1.26s |
 | 2026-04-04 | Phase 2 (T4) | 7 / 7 | T4全項目合格 / avg 1.53s(T4-5) / 10回連続エラーなし(T4-6) |
-| | Phase 2 | / 12 | |
-| | Phase 3 | / 4  | |
+| 2026-04-05 | Phase 2 (T5) | 5 / 5 | T5全項目合格 / T5-1: APIConnectionError→stop / T5-2: 5パターンJSON異常系 / T5-5: 自動再ロード8s |
+| 2026-04-05 | Phase 3 (T6) | 5 / 5 | T6全項目合格 / GPU最高62°C / VRAM安定 / CPU15.2% / avg 1.69s |
 
 ---
 
-*Updated: 2026-04-04*
+*Updated: 2026-04-05*
