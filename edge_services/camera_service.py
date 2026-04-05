@@ -14,6 +14,7 @@ Communication:
 """
 
 import asyncio
+import json
 import websockets
 import logging
 import time
@@ -127,7 +128,7 @@ class CameraService:
                 'fps': self.fps,
                 'format': 'jpeg'
             }
-            await websocket.send(str(info))
+            await websocket.send(json.dumps(info))
             async for _ in websocket:
                 pass
         except websockets.exceptions.ConnectionClosed:
