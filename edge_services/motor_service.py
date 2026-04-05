@@ -100,8 +100,9 @@ class MotorControlService:
             (left_cps, -right_cps, left_cps, -right_cps))
 
         self.last_cmd_time   = time.time()
-        self.current_linear  = linear
-        self.current_angular = angular
+        # Store clamped values so ACK reflects actual commanded velocity
+        self.current_linear  = max(-self.max_linear_vel,  min(self.max_linear_vel,  linear))
+        self.current_angular = max(-self.max_angular_vel, min(self.max_angular_vel, angular))
         self.logger.debug(
             f"cmd_vel: linear={linear:.3f} angular={angular:.3f} "
             f"→ left={left_cps:.1f} right={right_cps:.1f} cps"
