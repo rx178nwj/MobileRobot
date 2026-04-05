@@ -47,8 +47,11 @@ Usage:
   cd ~/ros2_ws && colcon build --packages-select mobile_robot_server
   source install/setup.bash
 
-  # Launch
+  # Launch (autonomous_mapping off by default)
   ros2 launch mobile_robot_server server_bringup.launch.py
+
+  # Enable autonomous mapping
+  ros2 launch mobile_robot_server server_bringup.launch.py autonomous_mapping:=true
 
   # Override LLM settings
   ros2 launch mobile_robot_server server_bringup.launch.py \\
@@ -66,6 +69,7 @@ import os
 from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node, SetParameter
 from nav2_common.launch import RewrittenYaml
@@ -91,6 +95,10 @@ def generate_launch_description():
     lidar_port = DeclareLaunchArgument(
         'lidar_port', default_value='/dev/ttyUSB0',
         description='YDLIDAR T-mini Plus serial port')
+
+    autonomous_mapping_arg = DeclareLaunchArgument(
+        'autonomous_mapping', default_value='false',
+        description='Start autonomous_mapping node (default: false — enable explicitly)')
 
     llm_base_url = DeclareLaunchArgument(
         'llm_base_url',
@@ -398,6 +406,7 @@ def generate_launch_description():
         executable='autonomous_mapping',
         name='autonomous_mapping',
         output='screen',
+        condition=IfCondition(LaunchConfiguration('autonomous_mapping')),
         parameters=[{
             'llm_base_url':        LaunchConfiguration('llm_base_url'),
             'llm_model':           LaunchConfiguration('llm_model'),
@@ -447,6 +456,7 @@ def generate_launch_description():
         llm_base_url,
         llm_model,
         yolo_model,
+        autonomous_mapping_arg,
         robot_state_pub,
         ws_motor,
         ws_odom,
