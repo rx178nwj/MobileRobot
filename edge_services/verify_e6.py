@@ -37,7 +37,7 @@ async def test_e6():
     # 2.0 rad/s (638 cps) / ki=2.0 → デッドゾーン突破 ~0.30s
     ANGULAR_VEL = 2.0           # rad/s
     TARGET_RAD  = 2.0 * math.pi # 360°
-    STOP_AT     = 0.984         # 360° - ループステップ(5.7°) = 354.3° → 最終 ≈ 360°
+    STOP_AT     = 0.990         # wheel_base=0.181m 再調整後: 354.9°+5.1°補正
     MAX_TIME    = 15.0          # 安全タイムアウト
 
     async with websockets.connect(MOTOR_URI) as motor_ws, \
