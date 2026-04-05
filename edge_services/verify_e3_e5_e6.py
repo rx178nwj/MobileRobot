@@ -138,10 +138,10 @@ async def test_e5():
         print('  スキップ')
         return
 
-    LINEAR_VEL  = 0.3    # m/s
+    LINEAR_VEL  = 0.15   # m/s (half speed for accuracy)
     TARGET_DIST = 1.0    # m
-    STOP_AT     = 0.97   # stop driving at 97% — remaining 3% covered by motor coast
-    MAX_TIME    = 15.0   # safety timeout
+    STOP_AT     = 0.98   # stop at 98% — at 0.15 m/s coast ≈ 0.02 m (half of 0.3 m/s)
+    MAX_TIME    = 20.0   # safety timeout
 
     async with websockets.connect(MOTOR_URI) as motor_ws, \
                websockets.connect(ODOM_URI)  as odom_ws:
