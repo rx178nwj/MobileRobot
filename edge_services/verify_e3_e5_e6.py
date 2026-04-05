@@ -54,7 +54,18 @@ async def stop(ws):
 
 
 async def get_odom(odom_ws) -> dict:
+    """Return the latest odom message, draining any stale buffered messages.
+
+    The publisher sends at 50 Hz (20 ms/msg). Using a 1 ms drain timeout means
+    we stop as soon as the queue is empty without catching the next live message.
+    Cap at 500 iterations to guarantee termination.
+    """
     msg = await asyncio.wait_for(odom_ws.recv(), timeout=2.0)
+    for _ in range(500):
+        try:
+            msg = await asyncio.wait_for(odom_ws.recv(), timeout=0.001)
+        except asyncio.TimeoutError:
+            break
     return json.loads(msg)
 
 
@@ -129,27 +140,38 @@ async def test_e5():
 
     LINEAR_VEL  = 0.3    # m/s
     TARGET_DIST = 1.0    # m
-    DRIVE_TIME  = TARGET_DIST / LINEAR_VEL
+    STOP_AT     = 0.97   # stop driving at 97% — remaining 3% covered by motor coast
+    MAX_TIME    = 15.0   # safety timeout
 
     async with websockets.connect(MOTOR_URI) as motor_ws, \
                websockets.connect(ODOM_URI)  as odom_ws:
+
+        # オドメトリをリセット (theta=0 にして向き蓄積をクリア)
+        await odom_ws.send(json.dumps({'type': 'reset'}))
+        await asyncio.wait_for(odom_ws.recv(), timeout=2.0)  # ack
+        await asyncio.sleep(0.1)
 
         # 初期pose取得
         odom0 = await get_odom(odom_ws)
         x0 = odom0['pose']['x']
         y0 = odom0['pose']['y']
         print(f'\n  開始位置: x={x0:.4f} m, y={y0:.4f} m')
-        print(f'  速度: {LINEAR_VEL} m/s × {DRIVE_TIME:.2f}s = 目標 {TARGET_DIST} m')
+        print(f'  速度: {LINEAR_VEL} m/s  目標: {TARGET_DIST} m (距離ベース停止)')
         print(f'\n  走行中...')
 
-        # 走行
+        # 距離ベース停止: 97%到達でコマンド停止、残りはコースト
         t_start = time.time()
-        while (time.time() - t_start) < DRIVE_TIME:
+        while (time.time() - t_start) < MAX_TIME:
             await send_cmd_vel(motor_ws, LINEAR_VEL, 0.0)
-            await asyncio.sleep(0.1)
+            odom = await get_odom(odom_ws)
+            traveled_now = math.sqrt(
+                (odom['pose']['x'] - x0)**2 + (odom['pose']['y'] - y0)**2)
+            if traveled_now >= TARGET_DIST * STOP_AT:
+                break
+            await asyncio.sleep(0.05)
 
         await stop(motor_ws)
-        await asyncio.sleep(0.3)  # 停止待ち
+        await asyncio.sleep(0.3)  # コースト待ち
 
         # 終了pose取得
         odom1 = await get_odom(odom_ws)
@@ -198,26 +220,35 @@ async def test_e6():
         print('  スキップ')
         return
 
-    ANGULAR_VEL  = 1.0           # rad/s
+    # Minimum reliable angular velocity is ~1.84 rad/s (dead zone = 440 duty = 587 cps).
+    # At 2.0 rad/s (638 cps) with ki=2.0, dead zone is overcome in ~0.30 s.
+    # Use angle-based stopping: drive until 97% of 360° reached, then coast.
+    ANGULAR_VEL  = 2.0           # rad/s  (was 1.0 — too slow for dead zone)
     TARGET_RAD   = 2.0 * math.pi # 360°
-    DRIVE_TIME   = TARGET_RAD / ANGULAR_VEL
+    STOP_AT      = 0.984         # 360° - loop_step(5.7°) = 354.3° → final ≈ 360°
+    MAX_TIME     = 15.0          # safety timeout
 
     async with websockets.connect(MOTOR_URI) as motor_ws, \
                websockets.connect(ODOM_URI)  as odom_ws:
+
+        # オドメトリをリセット (前テストの蓄積をクリア)
+        await odom_ws.send(json.dumps({'type': 'reset'}))
+        await asyncio.wait_for(odom_ws.recv(), timeout=2.0)  # ack
+        await asyncio.sleep(0.1)
 
         # 初期姿勢取得
         odom0 = await get_odom(odom_ws)
         theta0 = odom0['pose']['theta']
         print(f'\n  開始角度: {math.degrees(theta0):.2f}°')
-        print(f'  角速度: {ANGULAR_VEL} rad/s × {DRIVE_TIME:.2f}s = 目標 360°')
+        print(f'  角速度: {ANGULAR_VEL} rad/s  目標: 360° (角度ベース停止)')
         print(f'\n  旋回中...')
 
-        # 累積角度追跡
+        # 角度ベース停止: 97%到達でコマンド停止、残りはコースト
         theta_prev = theta0
         accumulated = 0.0
         t_start = time.time()
 
-        while (time.time() - t_start) < DRIVE_TIME:
+        while (time.time() - t_start) < MAX_TIME:
             await send_cmd_vel(motor_ws, 0.0, ANGULAR_VEL)
             odom = await get_odom(odom_ws)
             theta_now = odom['pose']['theta']
@@ -229,6 +260,8 @@ async def test_e6():
             accumulated += d_theta
             theta_prev = theta_now
 
+            if abs(accumulated) >= TARGET_RAD * STOP_AT:
+                break
             await asyncio.sleep(0.05)
 
         await stop(motor_ws)

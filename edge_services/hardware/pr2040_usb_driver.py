@@ -101,17 +101,19 @@ class PR2040USBDriver:
                 time.sleep(0.05)
 
             # Switch to firmware velocity PID mode and program calibrated gains.
-            # Gains calibrated 2026-03-29 via duty_sweep.py:
-            #   Dead zone: duty < 460.  0.5 m/s = 1994 cps → duty ≈ 521
-            #   kp=0.10 [duty/cps], ki=0.40 [duty/(cps·s)], kd=0.0
-            #   Dead zone overcome in ~0.33s; target reached in ~1.8s.
+            # Gains calibrated 2026-04-05 via duty_sweep.py:
+            #   Effective dead zone (both wheels): duty ≈ 440 → 587 cps = 0.147 m/s
+            #   Minimum reliable angular velocity: 1.84 rad/s
+            #   kp=0.10 [duty/cps], ki=2.0 [duty/(cps·s)], kd=0.0
+            #   Rotation 2.0 rad/s (638 cps): dead zone overcome in ~0.30s
+            #   Linear 0.5 m/s (1994 cps): dead zone overcome in ~0.06s
             for wheel in range(4):
-                self.set_velocity_pid_gains(wheel, kp=0.10, ki=0.40, kd=0.0)
+                self.set_velocity_pid_gains(wheel, kp=0.10, ki=2.0, kd=0.0)
             self._set_mode_all(self.MODE_VELOCITY)
             # Zero velocity targets immediately — firmware retains previous targets
             # across mode switches, so motors would restart on next MODE_VELOCITY.
             self.set_wheel_velocities((0.0, 0.0, 0.0, 0.0))
-            self.logger.info("PR2040 set to VELOCITY mode (kp=0.10, ki=0.40, kd=0.00)")
+            self.logger.info("PR2040 set to VELOCITY mode (kp=0.10, ki=2.00, kd=0.00)")
 
         except serial.SerialException as e:
             self.logger.error(f"Failed to connect to PR2040: {e}")

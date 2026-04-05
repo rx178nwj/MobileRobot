@@ -124,13 +124,13 @@ class OdometryService:
             return self._create_odom_message()
 
         # Calculate encoder deltas
-        # Left side: average of wheels 0 and 2
-        # Right side: average of wheels 1 and 3 (negated - mirrored mounting)
-        left_enc = (encoders[0] + encoders[2]) / 2.0
-        right_enc = -(encoders[1] + encoders[3]) / 2.0
+        # Only wheels 0 (left) and 1 (right) have working encoders.
+        # Right side is mirrored-mounted → negate enc[1].
+        left_enc = float(encoders[0])
+        right_enc = float(-encoders[1])
 
-        prev_left = (self.prev_encoders[0] + self.prev_encoders[2]) / 2.0
-        prev_right = -(self.prev_encoders[1] + self.prev_encoders[3]) / 2.0
+        prev_left = float(self.prev_encoders[0])
+        prev_right = float(-self.prev_encoders[1])
 
         delta_left = left_enc - prev_left
         delta_right = right_enc - prev_right
@@ -179,12 +179,13 @@ class OdometryService:
         }
 
     def reset_odometry(self):
-        """Reset odometry to origin"""
+        """Reset odometry to origin, syncing prev_encoders with current hardware state."""
         self.x = 0.0
         self.y = 0.0
         self.theta = 0.0
         self.linear_vel = 0.0
         self.angular_vel = 0.0
+        self.prev_encoders = list(self.driver.read_all_encoders())
         self.prev_time = time.time()
         self.logger.info("Odometry reset")
 
@@ -243,8 +244,9 @@ class OdometryService:
                     data = json.loads(message)
 
                     if data.get('type') == 'reset':
-                        self.reset_odometry()
                         self.driver.reset_encoders()
+                        await asyncio.sleep(0.05)  # wait for STATUS to reflect zeros
+                        self.reset_odometry()
                         await websocket.send(json.dumps({'type': 'ack', 'reset': True}))
 
                     elif data.get('type') == 'get_status':
