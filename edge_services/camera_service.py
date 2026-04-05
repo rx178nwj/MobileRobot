@@ -93,28 +93,40 @@ class CameraService:
             return None
 
     async def camera_publisher(self):
+        """Publish camera frames at fixed rate using deadline-based scheduling."""
         interval = 1.0 / self.fps
+        next_time = time.time() + interval
+
         while True:
             if not self.clients:
-                await asyncio.sleep(interval)
+                now = time.time()
+                sleep_sec = next_time - now
+                if sleep_sec > 0:
+                    await asyncio.sleep(sleep_sec)
+                next_time += interval
                 continue
+
             frame_data = await asyncio.get_event_loop().run_in_executor(
                 None, self.capture_frame
             )
-            if frame_data is None:
-                await asyncio.sleep(interval)
-                continue
-            disconnected = set()
-            for client in self.clients:
-                try:
-                    await client.send(frame_data)
-                except websockets.exceptions.ConnectionClosed:
-                    disconnected.add(client)
-                except Exception as e:
-                    self.logger.error(f"Error sending frame: {e}")
-                    disconnected.add(client)
-            self.clients -= disconnected
-            await asyncio.sleep(interval)
+            if frame_data is not None:
+                disconnected = set()
+                for client in list(self.clients):
+                    try:
+                        await client.send(frame_data)
+                    except websockets.exceptions.ConnectionClosed:
+                        disconnected.add(client)
+                    except Exception as e:
+                        self.logger.error(f"Error sending frame: {e}")
+                        disconnected.add(client)
+                self.clients -= disconnected
+
+            # Sleep until next deadline (absorbs capture + send time)
+            now = time.time()
+            sleep_sec = next_time - now
+            if sleep_sec > 0:
+                await asyncio.sleep(sleep_sec)
+            next_time += interval
 
     async def handle_client(self, websocket):
         client_addr = websocket.remote_address
