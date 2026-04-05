@@ -3,7 +3,7 @@
     "name": "mobile_robot",
     "wheel_base": 0.16,
     "wheel_radius": 0.033,
-    "encoder_cpr": 827.2,
+    "encoder_cpr": 2481.6,
     "max_linear_velocity": 0.5,
     "max_angular_velocity": 2.0
   },
