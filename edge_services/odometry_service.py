@@ -190,35 +190,34 @@ class OdometryService:
         self.logger.info("Odometry reset")
 
     async def odometry_publisher(self):
-        """Publish odometry at fixed rate"""
+        """Publish odometry at fixed rate using deadline-based scheduling."""
         interval = 1.0 / self.publish_rate
+        next_time = time.time() + interval
 
         while True:
-            # Driver is non-blocking (background reader thread)
             try:
                 encoders = self.driver.read_all_encoders()
-
-                # Calculate odometry
                 odom_msg = self.calculate_odometry(encoders)
 
-                # Broadcast to all connected clients
                 if self.clients:
                     message = json.dumps(odom_msg)
                     disconnected = set()
-
-                    for client in self.clients:
+                    for client in list(self.clients):
                         try:
                             await client.send(message)
                         except websockets.exceptions.ConnectionClosed:
                             disconnected.add(client)
-
-                    # Remove disconnected clients
                     self.clients -= disconnected
 
             except Exception as e:
                 self.logger.error(f"Error in odometry publisher: {e}")
 
-            await asyncio.sleep(interval)
+            # Sleep until next deadline (absorbs processing time)
+            now = time.time()
+            sleep_sec = next_time - now
+            if sleep_sec > 0:
+                await asyncio.sleep(sleep_sec)
+            next_time += interval
 
     async def handle_client(self, websocket):
         """
