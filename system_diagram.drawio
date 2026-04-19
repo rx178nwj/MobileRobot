@@ -4,15 +4,18 @@
             <root>
                 <mxCell id="0"/>
                 <mxCell id="1" parent="0"/>
-
-                <!-- Title -->
+                <mxCell id="rpi_frame" value="Raspberry Pi 5 (Edge)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;fontStyle=1;verticalAlign=top;align=center;spacingTop=5;" parent="1" vertex="1">
+                    <mxGeometry x="20" y="70" width="1000" height="1070" as="geometry"/>
+                </mxCell>
+                <mxCell id="docker_frame" value="Docker Container — ROS 2 Jazzy (network_mode: host)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;fontStyle=1;verticalAlign=top;align=center;spacingTop=5;" parent="1" vertex="1">
+                    <mxGeometry x="35" y="360" width="960" height="760" as="geometry"/>
+                </mxCell>
+                <mxCell id="nav2_frame" value="Nav2 Navigation Stack — lifecycle_manager_navigation (9 nodes active)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6f3e6;strokeColor=#5a9e5a;fontSize=12;fontStyle=1;verticalAlign=top;align=center;spacingTop=5;" parent="1" vertex="1">
+                    <mxGeometry x="55" y="720" width="910" height="185" as="geometry"/>
+                </mxCell>
                 <mxCell id="title" value="Mobile Robot System Architecture" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=20;fontStyle=1;" parent="1" vertex="1">
                     <mxGeometry x="327" y="20" width="700" height="40" as="geometry"/>
                 </mxCell>
-
-                <!-- ===== Arrows (back layer) ===== -->
-
-                <!-- Hardware → Edge Services -->
                 <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#b85450;fontSize=10;" parent="1" source="pr2040" target="motor_svc" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
@@ -25,8 +28,6 @@
                 <mxCell id="e4" value="USB 230400baud" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6c8ebf;fontColor=#6c8ebf;fontSize=10;" parent="1" source="lidar_hw" target="ydlidar_node" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
-
-                <!-- Edge Services → Bridge nodes (WebSocket) -->
                 <mxCell id="e5a" value="WS :8001" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;fontColor=#d6b656;fontSize=10;" parent="1" source="motor_svc" target="ws_motor" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
@@ -36,8 +37,6 @@
                 <mxCell id="e5c" value="WS :8003" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;fontColor=#d6b656;fontSize=10;" parent="1" source="camera_svc" target="ws_camera" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
-
-                <!-- Camera pipeline -->
                 <mxCell id="e6" value="/camera/image_raw/compressed" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#82b366;fontColor=#333333;fontSize=10;" parent="1" source="ws_camera" target="img_decomp" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
@@ -50,8 +49,6 @@
                         </Array>
                     </mxGeometry>
                 </mxCell>
-
-                <!-- SLAM pipeline: /scan + /odom → slam_toolbox → /map + TF -->
                 <mxCell id="e_scan_slam" value="/scan (BEST_EFFORT)" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#008000;fontColor=#008000;fontSize=10;" parent="1" source="ydlidar_node" target="slam_toolbox" edge="1">
                     <mxGeometry relative="1" as="geometry">
                         <Array as="points">
@@ -75,8 +72,6 @@
                 <mxCell id="e_map_nav2" value="/map" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#008000;fontColor=#008000;fontSize=10;" parent="1" source="slam_toolbox" target="nav2_frame" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
-
-                <!-- /scan → local costmap obstacle layer + collision_monitor -->
                 <mxCell id="e_scan_col" value="/scan (min_range 0.15m)" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#82b366;fontColor=#333333;fontSize=10;" parent="1" source="ydlidar_node" target="nav2_collision" edge="1">
                     <mxGeometry relative="1" as="geometry">
                         <Array as="points">
@@ -85,8 +80,6 @@
                         </Array>
                     </mxGeometry>
                 </mxCell>
-
-                <!-- cmd_vel pipeline -->
                 <mxCell id="e11" value="/cmd_vel" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#0080ff;fontColor=#0080ff;fontSize=10;fontStyle=1;" parent="1" source="nav2_frame" target="ws_motor" edge="1">
                     <mxGeometry relative="1" as="geometry">
                         <Array as="points">
@@ -108,8 +101,6 @@
                 <mxCell id="e13" value="/goal_pose" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;fontColor=#9673a6;fontSize=10;" parent="1" source="llm_nav" target="nav2_frame" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
-
-                <!-- llm_nav → YOLO: 画像データ送信 -->
                 <mxCell id="e15" value="① /camera/image_raw (numpy BGR)" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;fontColor=#9673a6;fontSize=10;fontStyle=1;" parent="1" source="llm_nav" target="yolo_node" edge="1">
                     <mxGeometry relative="1" as="geometry">
                         <Array as="points">
@@ -118,8 +109,6 @@
                         </Array>
                     </mxGeometry>
                 </mxCell>
-                <!-- YOLO → Ollama は e_yolo_ollama で定義済み -->
-                <!-- Ollama → llm_nav: JSON action -->
                 <mxCell id="e16" value="③ JSON {action: move_forward|turn_left|...}" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;fontColor=#9673a6;fontSize=10;dashed=1;fontStyle=1;" parent="1" source="lmstudio_model" target="llm_nav" edge="1">
                     <mxGeometry relative="1" as="geometry">
                         <Array as="points">
@@ -129,15 +118,12 @@
                         </Array>
                     </mxGeometry>
                 </mxCell>
-                <!-- YOLO → Ollama ラベル更新 -->
                 <mxCell id="e_yolo_ollama2_label" value="② scene text" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;fontColor=#9673a6;fontSize=10;" parent="1" source="yolo_node" target="lmstudio_model" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
                 <mxCell id="e17" value="/llm_command" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;fontColor=#d6b656;fontSize=10;" parent="1" source="user_node" target="llm_nav" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
-
-                <!-- autonomous_mapping arrows -->
                 <mxCell id="e_map_automap" value="/map" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#008000;fontColor=#008000;fontSize=10;" parent="1" source="slam_toolbox" target="autonomous_mapping" edge="1">
                     <mxGeometry relative="1" as="geometry">
                         <Array as="points">
@@ -154,23 +140,15 @@
                         </Array>
                     </mxGeometry>
                 </mxCell>
-
-                <!-- foxglove_bridge → Foxglove Studio -->
                 <mxCell id="e_foxglove" value="WS :8765" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d79b00;fontColor=#d79b00;fontSize=10;" parent="1" source="foxglove_bridge" target="foxglove_studio" edge="1">
                     <mxGeometry relative="1" as="geometry">
                         <Array as="points">
-                            <mxPoint x="910" y="977"/>
-                            <mxPoint x="910" y="805"/>
+                            <mxPoint x="1030" y="977"/>
+                            <mxPoint x="1030" y="920"/>
+                            <mxPoint x="1245" y="920"/>
                         </Array>
                     </mxGeometry>
                 </mxCell>
-
-                <!-- ===== Raspberry Pi frame ===== -->
-                <mxCell id="rpi_frame" value="Raspberry Pi 5 (Edge)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;fontStyle=1;verticalAlign=top;align=center;spacingTop=5;" parent="1" vertex="1">
-                    <mxGeometry x="20" y="70" width="1000" height="1070" as="geometry"/>
-                </mxCell>
-
-                <!-- Hardware -->
                 <mxCell id="hw_label" value="[ Hardware ]" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=12;fontStyle=2;" parent="1" vertex="1">
                     <mxGeometry x="40" y="115" width="160" height="20" as="geometry"/>
                 </mxCell>
@@ -183,8 +161,6 @@
                 <mxCell id="lidar_hw" value="&lt;b&gt;YDLIDAR T-mini Plus&lt;/b&gt;&lt;br&gt;/dev/ttyUSB0 230400baud&lt;br&gt;360° / 10Hz / 12m range" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="660" y="140" width="210" height="80" as="geometry"/>
                 </mxCell>
-
-                <!-- Edge Services -->
                 <mxCell id="edge_label" value="[ Edge Services — Python asyncio (launch_all.py) ]" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=12;fontStyle=2;" parent="1" vertex="1">
                     <mxGeometry x="40" y="242" width="420" height="20" as="geometry"/>
                 </mxCell>
@@ -197,13 +173,6 @@
                 <mxCell id="camera_svc" value="&lt;b&gt;camera_service&lt;/b&gt;&lt;br&gt;WebSocket :8003&lt;br&gt;JPEG stream (binary frames)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="460" y="267" width="205" height="70" as="geometry"/>
                 </mxCell>
-
-                <!-- Docker frame -->
-                <mxCell id="docker_frame" value="Docker Container — ROS 2 Jazzy (network_mode: host)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;fontStyle=1;verticalAlign=top;align=center;spacingTop=5;" parent="1" vertex="1">
-                    <mxGeometry x="35" y="360" width="960" height="760" as="geometry"/>
-                </mxCell>
-
-                <!-- Bridge nodes -->
                 <mxCell id="bridge_label" value="[ WebSocket Bridge Nodes ]" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=11;fontStyle=2;" parent="1" vertex="1">
                     <mxGeometry x="55" y="395" width="260" height="18" as="geometry"/>
                 </mxCell>
@@ -219,28 +188,17 @@
                 <mxCell id="ydlidar_node" value="&lt;b&gt;ydlidar_ros2_driver&lt;/b&gt;&lt;br&gt;/dev/ttyUSB0&lt;br&gt;pub: /scan&lt;br&gt;(BEST_EFFORT 10Hz)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="740" y="415" width="185" height="70" as="geometry"/>
                 </mxCell>
-
-                <!-- Processing row -->
                 <mxCell id="rsp_node" value="&lt;b&gt;robot_state_publisher&lt;/b&gt;&lt;br&gt;URDF inline&lt;br&gt;TF: base_footprint → base_link → laser_frame" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="55" y="510" width="195" height="65" as="geometry"/>
                 </mxCell>
                 <mxCell id="img_decomp" value="&lt;b&gt;image_transport/republish&lt;/b&gt;&lt;br&gt;in_transport: compressed&lt;br&gt;out_transport: raw&lt;br&gt;pub: /camera/image_raw" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="270" y="510" width="200" height="65" as="geometry"/>
                 </mxCell>
-
-                <!-- slam_toolbox (replaces RTABMap) -->
                 <mxCell id="slam_toolbox" value="&lt;b&gt;slam_toolbox (async_slam_toolbox_node)&lt;/b&gt;&lt;br&gt;IN: /scan (BEST_EFFORT, QoS matched) + /odom&lt;br&gt;OUT: /map (OccupancyGrid, 5cm resolution)&lt;br&gt;     TF: map → odom&lt;br&gt;Lifecycle: lifecycle_manager_slam (bond_timeout=0)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="55" y="605" width="370" height="90" as="geometry"/>
                 </mxCell>
-
-                <!-- LLM Nav -->
                 <mxCell id="llm_nav" value="&lt;b&gt;llm_nav_controller&lt;/b&gt;&lt;br&gt;[Docker / ROS 2 Node]&lt;br&gt;━━━━━━━━━━━━━━━━━━━━━━━━&lt;br&gt;IN:  /camera/image_raw&lt;br&gt;IN:  /llm_command&lt;br&gt;━━━━━━━━━━━━━━━━━━━━━━━━&lt;br&gt;OUT: /cmd_vel&lt;br&gt;OUT: /goal_pose" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="480" y="580" width="220" height="130" as="geometry"/>
-                </mxCell>
-
-                <!-- Nav2 Stack frame -->
-                <mxCell id="nav2_frame" value="Nav2 Navigation Stack — lifecycle_manager_navigation (9 nodes active)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6f3e6;strokeColor=#5a9e5a;fontSize=12;fontStyle=1;verticalAlign=top;align=center;spacingTop=5;" parent="1" vertex="1">
-                    <mxGeometry x="55" y="720" width="910" height="185" as="geometry"/>
                 </mxCell>
                 <mxCell id="nav2_controller" value="&lt;b&gt;controller_server&lt;/b&gt;&lt;br&gt;RegulatedPurePursuit&lt;br&gt;10Hz → /cmd_vel_nav" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6f3e6;strokeColor=#5a9e5a;fontSize=10;" parent="1" vertex="1">
                     <mxGeometry x="65" y="755" width="140" height="65" as="geometry"/>
@@ -263,74 +221,48 @@
                 <mxCell id="nav2_collision" value="&lt;b&gt;collision_monitor&lt;/b&gt;&lt;br&gt;/scan (min_range 0.15m)&lt;br&gt;→ final /cmd_vel" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6f3e6;strokeColor=#5a9e5a;fontSize=10;" parent="1" vertex="1">
                     <mxGeometry x="820" y="755" width="135" height="65" as="geometry"/>
                 </mxCell>
-
-                <!-- autonomous_mapping (NEW) -->
                 <mxCell id="automap_label" value="[ Autonomous Exploration ]" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=11;fontStyle=2;" parent="1" vertex="1">
                     <mxGeometry x="55" y="912" width="250" height="18" as="geometry"/>
                 </mxCell>
                 <mxCell id="autonomous_mapping" value="&lt;b&gt;autonomous_mapping&lt;/b&gt;&lt;br&gt;IN: /map + /odom + /mapping/stop&lt;br&gt;    /camera/image_raw/compressed (optional)&lt;br&gt;Frontier detection → /navigate_to_pose (action)&lt;br&gt;OUT: /mapping/status (coverage %, stuck_timeout=60s)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="55" y="932" width="355" height="90" as="geometry"/>
                 </mxCell>
-
-                <!-- foxglove_bridge (NEW) -->
                 <mxCell id="foxglove_bridge" value="&lt;b&gt;foxglove_bridge v3.2.3&lt;/b&gt;&lt;br&gt;WebSocket :8765&lt;br&gt;Advertises: 74 ROS2 topics&lt;br&gt;→ Foxglove Studio (browser)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="435" y="932" width="270" height="90" as="geometry"/>
                 </mxCell>
-
-                <!-- ===== Right panel ===== -->
-
-                <!-- Key Topic Flow summary -->
                 <mxCell id="flow_frame" value="Key Topic &amp; Data Flow" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=12;fontStyle=1;verticalAlign=top;align=center;spacingTop=5;" parent="1" vertex="1">
                     <mxGeometry x="1060" y="80" width="560" height="355" as="geometry"/>
                 </mxCell>
                 <mxCell id="flow_text" value="&lt;b&gt;Sensor Input&lt;/b&gt;&lt;br&gt;• YDLIDAR T-mini → /scan  (BEST_EFFORT, 10Hz, 360°)&lt;br&gt;• IMX708 → camera_service :8003 → ws_camera_bridge&lt;br&gt;  → /camera/image_raw/compressed&lt;br&gt;  → image_decompress → /camera/image_raw&lt;br&gt;• PR2040 encoders → odom_service :8002 → ws_odom_pub&lt;br&gt;  → /odom  +  TF(odom → base_footprint)&lt;br&gt;&lt;br&gt;&lt;b&gt;SLAM (2D LiDAR + Odometry)&lt;/b&gt;&lt;br&gt;• /scan (BEST_EFFORT) + /odom → slam_toolbox&lt;br&gt;• slam_toolbox → /map (OccupancyGrid, 5cm resolution)&lt;br&gt;• slam_toolbox → TF(map → odom)&lt;br&gt;• lifecycle_manager_slam activates node (bond_timeout=0)&lt;br&gt;&lt;br&gt;&lt;b&gt;Navigation&lt;/b&gt;&lt;br&gt;• /map + /goal_pose → bt_navigator → controller_server&lt;br&gt;• controller_server → /cmd_vel_nav&lt;br&gt;• velocity_smoother → /cmd_vel_smoothed&lt;br&gt;• collision_monitor (/scan, min_range 0.15m) → /cmd_vel&lt;br&gt;&lt;br&gt;&lt;b&gt;Autonomous Mapping&lt;/b&gt;&lt;br&gt;• /map frontier detection → /navigate_to_pose action&lt;br&gt;• /mapping/status (coverage%, stuck_timeout=60s)&lt;br&gt;&lt;br&gt;&lt;b&gt;AI Navigation Pipeline (YOLO + Ollama)&lt;/b&gt;&lt;br&gt;• /camera/image_raw → YOLO yolov8s.pt (RTX 4060)&lt;br&gt;  → scene text: &quot;person (center,far), chair (left,close)&quot;&lt;br&gt;• scene text + /llm_command → Ollama qwen3.5:9b&lt;br&gt;  → localhost:11434/v1 (no cloud, fully local)&lt;br&gt;• JSON {action} → /cmd_vel or /goal_pose&lt;br&gt;&lt;br&gt;&lt;b&gt;Motor Output&lt;/b&gt;&lt;br&gt;• /cmd_vel → ws_motor_controller → WS :8001&lt;br&gt;• → motor_service → PR2040 PWM L/R" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=11;spacingLeft=10;" parent="1" vertex="1">
                     <mxGeometry x="1068" y="110" width="540" height="315" as="geometry"/>
                 </mxCell>
-
-                <!-- TF Tree -->
                 <mxCell id="tf_frame" value="TF Tree" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666;fontColor=#333;fontSize=12;fontStyle=1;verticalAlign=top;align=center;spacingTop=5;" parent="1" vertex="1">
                     <mxGeometry x="1060" y="450" width="260" height="140" as="geometry"/>
                 </mxCell>
                 <mxCell id="tf_text" value="map&lt;br&gt; └─ odom  &lt;i&gt;(slam_toolbox)&lt;/i&gt;&lt;br&gt;     └─ base_footprint  &lt;i&gt;(ws_odom_pub)&lt;/i&gt;&lt;br&gt;          └─ base_link  &lt;i&gt;(robot_state_pub)&lt;/i&gt;&lt;br&gt;               └─ laser_frame  &lt;i&gt;(robot_state_pub)&lt;/i&gt;&lt;br&gt;               └─ camera_optical_frame  &lt;i&gt;(rsp)&lt;/i&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="1070" y="485" width="240" height="95" as="geometry"/>
                 </mxCell>
-
-                <!-- Operator -->
                 <mxCell id="user_node" value="&lt;b&gt;Operator&lt;/b&gt;&lt;br&gt;ros2 topic pub /llm_command&lt;br&gt;{mode: explore/navigate/track}" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="1340" y="450" width="270" height="80" as="geometry"/>
                 </mxCell>
-
-                <!-- ===== Libra Host System frame ===== -->
                 <mxCell id="lmstudio_frame" value="Libra — Ubuntu 24.04 Host System  (NVIDIA RTX 4060 Laptop 8GB / CUDA 13.0)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e8ff;strokeColor=#9673a6;fontSize=13;fontStyle=1;verticalAlign=top;align=center;spacingTop=5;" parent="1" vertex="1">
                     <mxGeometry x="1060" y="600" width="560" height="310" as="geometry"/>
                 </mxCell>
-
-                <!-- YOLO on host -->
                 <mxCell id="yolo_node" value="&lt;b&gt;YOLO — yolov8s.pt&lt;/b&gt;&lt;br&gt;ultralytics (pip, system-wide)&lt;br&gt;device: cuda:0 (RTX 4060)&lt;br&gt;IN: /camera/image_raw (numpy)&lt;br&gt;OUT: scene description (text)&lt;br&gt;例: &quot;person (center,far), chair (left,close)&quot;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="1075" y="640" width="250" height="105" as="geometry"/>
                 </mxCell>
-
-                <!-- Ollama on host -->
                 <mxCell id="lmstudio_model" value="&lt;b&gt;Ollama — qwen3.5:9b&lt;/b&gt;&lt;br&gt;systemd service (OLLAMA_HOST=0.0.0.0)&lt;br&gt;API: localhost:11434/v1 (OpenAI互換)&lt;br&gt;IN: YOLO scene text + navigation goal&lt;br&gt;OUT: JSON {action: move_forward|turn_left|&lt;br&gt;  turn_right|stop|arrived}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="1345" y="640" width="260" height="105" as="geometry"/>
                 </mxCell>
-
-
-                <!-- Host note -->
                 <mxCell id="host_note" value="※ YOLO・Ollama はDockerコンテナ外のホストOS上で直接動作&lt;br&gt;llm_nav_controller (Docker) → YOLO (host Python) → Ollama (systemd)" style="text;html=1;strokeColor=none;fillColor=#f9f0ff;align=left;verticalAlign=middle;fontSize=10;rounded=1;" parent="1" vertex="1">
                     <mxGeometry x="1075" y="760" width="530" height="40" as="geometry"/>
                 </mxCell>
-
-                <!-- Foxglove Studio (browser) -->
                 <mxCell id="foxglove_studio" value="&lt;b&gt;Foxglove Studio (Browser)&lt;/b&gt;&lt;br&gt;Connection: Foxglove WebSocket&lt;br&gt;ws://&lt;robot-ip&gt;:8765&lt;br&gt;74 topics: LaserScan / Image / Odometry / Map / TF" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="1060" y="930" width="370" height="90" as="geometry"/>
                 </mxCell>
-
-                <!-- Updated note -->
                 <mxCell id="updated" value="Updated: 2026-04-04" style="text;html=1;strokeColor=none;fillColor=none;align=right;verticalAlign=middle;fontSize=10;fontStyle=2;fontColor=#666666;" parent="1" vertex="1">
                     <mxGeometry x="1440" y="1120" width="180" height="20" as="geometry"/>
                 </mxCell>
-
             </root>
         </mxGraphModel>
     </diagram>

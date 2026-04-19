@@ -3,7 +3,9 @@ FROM ros:jazzy-ros-base
 # Install additional packages
 RUN apt-get update && apt-get install -y \
     python3-pip \
+    python3-dev \
     python3-colcon-common-extensions \
+    swig \
     ros-jazzy-cv-bridge \
     ros-jazzy-v4l2-camera \
     ros-jazzy-image-transport \
@@ -25,11 +27,12 @@ RUN apt-get update && apt-get install -y \
     nano \
     && rm -rf /var/lib/apt/lists/*
 
-# Install YDLidar SDK
+# Install YDLidar SDK (C library + Python bindings)
 RUN git clone https://github.com/YDLIDAR/YDLidar-SDK.git /tmp/YDLidar-SDK && \
     cmake -S /tmp/YDLidar-SDK -B /tmp/YDLidar-SDK/build -DCMAKE_INSTALL_PREFIX=/usr/local && \
     cmake --build /tmp/YDLidar-SDK/build -j4 && \
     cmake --install /tmp/YDLidar-SDK/build && \
+    pip3 install --break-system-packages /tmp/YDLidar-SDK && \
     rm -rf /tmp/YDLidar-SDK
 
 # Install Python dependencies

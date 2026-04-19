@@ -1,0 +1,25 @@
+[2026-04-05 22:01:59][info] SDK initializing
+[2026-04-05 22:01:59][info] SDK has been initialized
+[2026-04-05 22:01:59][info] SDK Version: 1.2.19
+[2026-04-05 22:01:59][info] Connect elapsed time 8 ms
+[2026-04-05 22:01:59][info] Lidar successfully connected [/dev/ttyUSB0:230400]
+[2026-04-05 22:02:00][info] Lidar running correctly! The health status good
+[2026-04-05 22:02:00][info] Current Lidar Model Code 151
+[2026-04-05 22:02:00][info] Baseplate device info
+Firmware version: 1.2
+Hardware version: 1
+Model: Tmini Plus
+Serial: 2026010700090470
+[2026-04-05 22:02:00][info] Current scan frequency: 10.00Hz
+[2026-04-05 22:02:00][info] Current scan frequency: 10.00Hz
+[2026-04-05 22:02:00][info] Check status, Elapsed time 892 ms
+[2026-04-05 22:02:00][info] Lidar init success, Elapsed time [900]ms
+[2026-04-05 22:02:02][info] [YDLIDAR] Create thread 0x94D0F160
+[2026-04-05 22:02:02][info] Successed to start scan mode, Elapsed time 2100 ms
+[2026-04-05 22:02:02][info] Scan Frequency: 10.00Hz
+[2026-04-05 22:02:02][info] Fixed Size: 430
+[2026-04-05 22:02:02][info] Sample Rate: 4.00K
+[2026-04-05 22:02:02][info] Successed to check the lidar, Elapsed time 0 ms
+[2026-04-05 22:02:02][info] Now lidar is scanning...
+signal_handler(2)
+[2026-04-05 22:02:41][info] Now lidar scanning has stopped!
