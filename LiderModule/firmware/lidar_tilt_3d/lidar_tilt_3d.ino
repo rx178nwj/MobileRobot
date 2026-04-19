@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <SCServo.h>
+#include "MPU6050_6Axis_MotionApps20.h"
 
 // Pins: Seeed XIAO ESP32-C3
 #define LIDAR_RXD 4
@@ -13,6 +14,8 @@
 #define MPU6050_ADDR 0x68
 #define SERVO_ID_TILT 1
 #define SERVO_CENTER 2048
+// +1: normal direction, -1: inverted direction
+#define SERVO_DIRECTION -1
 
 #define LIDAR_BAUDRATE 230400
 #define SERVO_BAUDRATE 1000000
@@ -33,14 +36,25 @@
 #define TILT_STEP_DEFAULT 2.0f
 #define TILT_SAFE_LIMIT 50.0f
 
-#define SETTLE_MS 120
+#define SETTLE_MS_MIN 150
+#define SETTLE_MS_MAX 1300
+// Production fast-detection profile: capture immediately after the tilt command.
+// This intentionally includes points measured while the servo is moving.
+#define SCAN_SETTLE_DISABLED 1
 #define IMU_READ_MS 10
 #define IMU_SEND_MS 50
 #define MAX_SCAN_POINTS 720
 #define MAX_PROTO_PAYLOAD 4096
+#define CAPTURE_TIMEOUT_MS 110
+#define CAPTURE_MIN_POINTS 25
+// Human-readable USB debug mode.
+// 1: Print IMU + servo ReadPos as text and suppress binary TX frames.
+// 0: Normal binary protocol behavior.
+#define USB_TEXT_DEBUG_MODE 0
 
 HardwareSerial LidarSerial(1);
 SMS_STS servo;
+MPU6050 mpu(MPU6050_ADDR, &Wire);
 
 struct LidarPoint {
   uint16_t angle_x100;
@@ -57,7 +71,16 @@ static float imuRoll = 0.0f;
 static float imuYaw = 0.0f;
 static uint32_t lastImuReadMs = 0;
 static uint32_t lastImuSendMs = 0;
-static uint32_t lastImuMicros = 0;
+static uint8_t servoTxId = SERVO_ID_TILT;
+static int8_t servoReadId = -1;
+static uint32_t lastServoDebugMs = 0;
+static uint32_t lastServoProbeMs = 0;
+static bool dmpReady = false;
+static uint16_t dmpPacketSize = 0;
+static uint8_t dmpFifoBuffer[64];
+static Quaternion dmpQ;
+static VectorFloat dmpGravity;
+static float dmpYpr[3];
 
 enum Scan3DState {
   S3D_IDLE,
@@ -76,6 +99,7 @@ static float currentTilt = 0.0f;
 static uint16_t stepIndex = 0;
 static uint16_t totalSteps = 0;
 static uint32_t stateStartedMs = 0;
+static uint32_t settleMsCurrent = SETTLE_MS_MIN;
 
 static uint8_t rxFrame[128];
 static uint16_t rxIndex = 0;
@@ -87,6 +111,7 @@ static uint8_t lidarBuf[2300];
 static uint16_t lidarIndex = 0;
 static uint16_t lidarExpected = 0;
 static uint8_t lidarState = 0;
+static bool lidarMotorOn = false;
 
 static uint8_t checksum(uint8_t type, uint16_t len, const uint8_t *payload) {
   uint8_t cs = type ^ (uint8_t)(len & 0xFF) ^ (uint8_t)(len >> 8);
@@ -112,6 +137,12 @@ static float readF32(const uint8_t *p) {
 }
 
 static void sendFrame(uint8_t type, const uint8_t *payload, uint16_t len) {
+#if USB_TEXT_DEBUG_MODE
+  (void)type;
+  (void)payload;
+  (void)len;
+  return;
+#else
   Serial.write(PROTO_SYNC1);
   Serial.write(PROTO_SYNC2);
   Serial.write(type);
@@ -121,6 +152,7 @@ static void sendFrame(uint8_t type, const uint8_t *payload, uint16_t len) {
     Serial.write(payload, len);
   }
   Serial.write(checksum(type, len, payload));
+#endif
 }
 
 static void sendStatus(uint8_t state, uint16_t step, uint16_t total) {
@@ -133,87 +165,125 @@ static void sendStatus(uint8_t state, uint16_t step, uint16_t total) {
 
 static int angleToServoPos(float angleDeg) {
   float limited = constrain(angleDeg, -TILT_SAFE_LIMIT, TILT_SAFE_LIMIT);
-  int pos = SERVO_CENTER + (int)(limited * 4096.0f / 360.0f);
+  int pos = SERVO_CENTER + (int)(SERVO_DIRECTION * limited * 4096.0f / 360.0f);
   return constrain(pos, 0, 4095);
 }
 
 static void setTiltAngle(float angleDeg) {
   currentTilt = constrain(angleDeg, -TILT_SAFE_LIMIT, TILT_SAFE_LIMIT);
   int pos = angleToServoPos(currentTilt);
-  servo.WritePosEx(SERVO_ID_TILT, pos, 1800, 50);
+  servo.WritePosEx(servoTxId, pos, 1800, 50);
 }
 
-static void mpuWrite(uint8_t reg, uint8_t value) {
-  Wire.beginTransmission(MPU6050_ADDR);
-  Wire.write(reg);
-  Wire.write(value);
-  Wire.endTransmission();
+static void initServo() {
+  delay(100);
+  // Prefer the expected ID first.
+  if (servo.Ping(SERVO_ID_TILT) != -1) {
+    servoTxId = SERVO_ID_TILT;
+    servoReadId = SERVO_ID_TILT;
+    servo.EnableTorque(servoTxId, 1);
+    return;
+  }
+
+  // Try to detect a servo ID on a typical small range.
+  for (uint8_t id = 0; id <= 20; id++) {
+    if (servo.Ping(id) != -1) {
+      servoTxId = id;
+      servoReadId = id;
+      servo.EnableTorque(servoTxId, 1);
+      return;
+    }
+    delay(10);
+  }
+
+  // Fallback: broadcast command works even when ID is unknown.
+  servoTxId = 0xFE;
+  servoReadId = -1;
 }
 
-static bool mpuReadBytes(uint8_t reg, uint8_t *buf, uint8_t len) {
-  Wire.beginTransmission(MPU6050_ADDR);
-  Wire.write(reg);
-  if (Wire.endTransmission(false) != 0) {
-    return false;
+static int8_t probeServoId() {
+  if (servoTxId != 0xFE && servo.Ping(servoTxId) != -1) {
+    return (int8_t)servoTxId;
   }
-  uint8_t got = Wire.requestFrom((uint8_t)MPU6050_ADDR, len, (uint8_t)true);
-  if (got != len) {
-    return false;
+  for (uint8_t id = 0; id <= 20; id++) {
+    if (servo.Ping(id) != -1) {
+      return (int8_t)id;
+    }
+    delay(2);
   }
-  for (uint8_t i = 0; i < len; i++) {
-    buf[i] = Wire.read();
-  }
-  return true;
+  return (int8_t)-1;
 }
 
-static int16_t be16(const uint8_t *p) {
-  return (int16_t)((p[0] << 8) | p[1]);
+static void debugServoImuStatus(uint32_t nowMs) {
+#if USB_TEXT_DEBUG_MODE
+  if (nowMs - lastServoDebugMs < 250) {
+    return;
+  }
+  lastServoDebugMs = nowMs;
+
+  if (servoReadId < 0 && (nowMs - lastServoProbeMs >= 2000)) {
+    lastServoProbeMs = nowMs;
+    servoReadId = probeServoId();
+  }
+
+  int pos = -1;
+  if (servoReadId >= 0) {
+    pos = servo.ReadPos(servoReadId);
+    if (pos < 0) {
+      servoReadId = -1;
+    }
+  }
+
+  Serial.print("[dbg] tx_id=");
+  Serial.print((int)servoTxId);
+  Serial.print(" read_id=");
+  Serial.print((int)servoReadId);
+  Serial.print(" read_pos=");
+  Serial.print(pos);
+  Serial.print(" tilt=");
+  Serial.print(currentTilt, 2);
+  Serial.print(" imu_pitch=");
+  Serial.print(imuPitch, 2);
+  Serial.print(" imu_roll=");
+  Serial.print(imuRoll, 2);
+  Serial.print(" imu_yaw=");
+  Serial.println(imuYaw, 2);
+#else
+  (void)nowMs;
+#endif
 }
 
 static void initImu() {
   Wire.begin(IMU_SDA, IMU_SCL);
   Wire.setClock(400000);
-  delay(50);
-  mpuWrite(0x6B, 0x00);
-  mpuWrite(0x1A, 0x03);
-  mpuWrite(0x1B, 0x00);
-  mpuWrite(0x1C, 0x00);
-  lastImuMicros = micros();
+  delay(100);
+
+  mpu.initialize();
+  uint8_t devStatus = mpu.dmpInitialize();
+  if (devStatus == 0) {
+    mpu.setDMPEnabled(true);
+    dmpPacketSize = mpu.dmpGetFIFOPacketSize();
+    dmpReady = true;
+  } else {
+    dmpReady = false;
+  }
 }
 
 static void updateImu() {
-  uint8_t b[14];
-  if (!mpuReadBytes(0x3B, b, sizeof(b))) {
+  if (!dmpReady) {
     return;
   }
 
-  int16_t axRaw = be16(b + 0);
-  int16_t ayRaw = be16(b + 2);
-  int16_t azRaw = be16(b + 4);
-  int16_t gxRaw = be16(b + 8);
-  int16_t gyRaw = be16(b + 10);
-  int16_t gzRaw = be16(b + 12);
-
-  float ax = axRaw / 16384.0f;
-  float ay = ayRaw / 16384.0f;
-  float az = azRaw / 16384.0f;
-  float gx = gxRaw / 131.0f;
-  float gy = gyRaw / 131.0f;
-  float gz = gzRaw / 131.0f;
-
-  uint32_t now = micros();
-  float dt = (now - lastImuMicros) / 1000000.0f;
-  lastImuMicros = now;
-  if (dt <= 0.0f || dt > 0.2f) {
-    dt = IMU_READ_MS / 1000.0f;
+  if (!mpu.dmpGetCurrentFIFOPacket(dmpFifoBuffer)) {
+    return;
   }
+  mpu.dmpGetQuaternion(&dmpQ, dmpFifoBuffer);
+  mpu.dmpGetGravity(&dmpGravity, &dmpQ);
+  mpu.dmpGetYawPitchRoll(dmpYpr, &dmpQ, &dmpGravity);
 
-  float accPitch = atan2f(ax, sqrtf(ay * ay + az * az)) * 180.0f / PI;
-  float accRoll = atan2f(ay, sqrtf(ax * ax + az * az)) * 180.0f / PI;
-  const float alpha = 0.96f;
-  imuPitch = alpha * (imuPitch + gy * dt) + (1.0f - alpha) * accPitch;
-  imuRoll = alpha * (imuRoll + gx * dt) + (1.0f - alpha) * accRoll;
-  imuYaw += gz * dt;
+  imuYaw = dmpYpr[0] * 180.0f / PI;
+  imuPitch = dmpYpr[1] * 180.0f / PI;
+  imuRoll = dmpYpr[2] * 180.0f / PI;
 }
 
 static void sendImu() {
@@ -269,8 +339,28 @@ static void processLidarPacket(const uint8_t *pkt, uint16_t len) {
   }
 }
 
+static void lidarStartMotor() {
+  if (lidarMotorOn) {
+    return;
+  }
+  const uint8_t cmd[] = {0xA5, 0x60};
+  LidarSerial.write(cmd, sizeof(cmd));
+  lidarMotorOn = true;
+}
+
+static void lidarStopMotor() {
+  if (!lidarMotorOn) {
+    return;
+  }
+  const uint8_t cmd[] = {0xA5, 0x65};
+  LidarSerial.write(cmd, sizeof(cmd));
+  lidarMotorOn = false;
+}
+
 static void pollLidar() {
-  while (LidarSerial.available()) {
+  // Avoid starving other tasks when LiDAR stream is continuous.
+  int budget = 512;
+  while (budget-- > 0 && LidarSerial.available()) {
     uint8_t b = (uint8_t)LidarSerial.read();
     switch (lidarState) {
       case 0:
@@ -327,6 +417,25 @@ static void sendScanSlice() {
   sendFrame(MSG_SCAN_SLICE, payload, len);
 }
 
+static uint32_t computeSettleMs(float deltaDeg) {
+#if SCAN_SETTLE_DISABLED
+  (void)deltaDeg;
+  return 0;
+#else
+  float a = fabsf(deltaDeg);
+  // Faster profile:
+  // keep ~1.25s class at 45deg while reducing small-step overhead.
+  uint32_t ms = (uint32_t)(110.0f + 25.0f * a + 0.5f);
+  if (ms < SETTLE_MS_MIN) {
+    ms = SETTLE_MS_MIN;
+  }
+  if (ms > SETTLE_MS_MAX) {
+    ms = SETTLE_MS_MAX;
+  }
+  return ms;
+#endif
+}
+
 static uint16_t computeTotalSteps(float minA, float maxA, float stepA) {
   if (stepA <= 0.0f || maxA < minA) {
     return 0;
@@ -347,6 +456,7 @@ static void startScan(float minA, float maxA, float stepA) {
   if (totalSteps == 0) {
     return;
   }
+  lidarStartMotor();
   stepIndex = 0;
   currentTilt = tiltMin;
   scanState = S3D_MOVING;
@@ -356,6 +466,7 @@ static void startScan(float minA, float maxA, float stepA) {
 
 static void stopScan() {
   scanState = S3D_IDLE;
+  lidarStopMotor();
   resetLidarScan();
   setTiltAngle(0.0f);
   sendStatus(2, stepIndex, totalSteps);
@@ -366,23 +477,30 @@ static void updateScanState() {
     case S3D_IDLE:
       break;
     case S3D_MOVING:
+      {
+      float prevTilt = currentTilt;
       currentTilt = tiltMin + stepIndex * tiltStep;
       if (currentTilt > tiltMax) {
         currentTilt = tiltMax;
       }
+      settleMsCurrent = computeSettleMs(currentTilt - prevTilt);
       setTiltAngle(currentTilt);
       resetLidarScan();
       stateStartedMs = millis();
       scanState = S3D_SETTLING;
+      }
       break;
     case S3D_SETTLING:
-      if (millis() - stateStartedMs >= SETTLE_MS) {
+      if (millis() - stateStartedMs >= settleMsCurrent) {
         resetLidarScan();
+        stateStartedMs = millis();
         scanState = S3D_CAPTURING;
       }
       break;
     case S3D_CAPTURING:
-      if (scanReady) {
+      if (scanReady ||
+          ((millis() - stateStartedMs >= CAPTURE_TIMEOUT_MS) &&
+           (scanCount >= CAPTURE_MIN_POINTS))) {
         scanState = S3D_SENDING;
       }
       break;
@@ -398,6 +516,7 @@ static void updateScanState() {
       break;
     case S3D_COMPLETE:
       setTiltAngle(0.0f);
+      lidarStopMotor();
       sendStatus(2, totalSteps, totalSteps);
       scanState = S3D_IDLE;
       break;
@@ -468,10 +587,23 @@ void setup() {
   Serial0.begin(SERVO_BAUDRATE, SERIAL_8N1, SERVO_RXD, SERVO_TXD);
   LidarSerial.begin(LIDAR_BAUDRATE, SERIAL_8N1, LIDAR_RXD, LIDAR_TXD);
   servo.pSerial = &Serial0;
+  initServo();
+  // If no servo response, retry once with swapped UART pins.
+  if (servoReadId < 0) {
+    Serial0.end();
+    delay(50);
+    Serial0.begin(SERVO_BAUDRATE, SERIAL_8N1, SERVO_TXD, SERVO_RXD);
+    delay(50);
+    initServo();
+  }
+#if USB_TEXT_DEBUG_MODE
+  Serial.println("[dbg] USB_TEXT_DEBUG_MODE=1 (binary TX disabled)");
+  Serial.print("[dbg] init tx_id=");
+  Serial.println((int)servoTxId);
+#endif
   initImu();
 
-  uint8_t startScanCmd[] = {0xA5, 0x60};
-  LidarSerial.write(startScanCmd, sizeof(startScanCmd));
+  lidarStopMotor();
   setTiltAngle(0.0f);
 }
 
@@ -488,5 +620,6 @@ void loop() {
     lastImuSendMs = now;
     sendImu();
   }
+  debugServoImuStatus(now);
   updateScanState();
 }

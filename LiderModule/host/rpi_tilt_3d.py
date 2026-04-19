@@ -241,14 +241,60 @@ def save_ply(path: Path, points: np.ndarray) -> None:
             )
 
 
-def save_points(path: str, points: np.ndarray) -> None:
-    out = Path(path)
-    if out.suffix.lower() == ".csv":
-        save_csv(out, points)
-    elif out.suffix.lower() == ".ply":
-        save_ply(out, points)
-    else:
-        raise ValueError("--save must end with .ply or .csv")
+def load_scan_pattern(csv_path: str, mode: str = "下方") -> list[float]:
+    """Load scan angles from CSV pattern file by step number."""
+    with open(csv_path, 'r', encoding='utf-8-sig') as f:
+        reader = csv.reader(f)
+        rows = list(reader)
+
+    # Find the mode section
+    start_row = None
+    for i, row in enumerate(rows):
+        if row and row[0].startswith(mode):
+            start_row = i + 3  # Skip header rows (mode + pattern + angle header)
+            break
+
+    if start_row is None:
+        raise ValueError(f"Mode '{mode}' not found in CSV")
+
+    # Find end row (next mode or end)
+    end_row = len(rows)
+    for j in range(start_row, len(rows)):
+        if rows[j] and (rows[j][0].startswith("上方") or rows[j][0].startswith("下方")):
+            if j > start_row:
+                end_row = j
+                break
+
+    # Collect angle for each step number in the selected mode section.
+    seq_to_angle = {}
+    for row in rows[start_row:end_row]:
+        if not row or len(row) < 2:
+            continue
+        angle = None
+        for angle_str in (row[0], row[1]):
+            if not angle_str:
+                continue
+            try:
+                angle = float(angle_str)
+                break
+            except ValueError:
+                continue
+        if angle is None:
+            continue
+
+        for col_idx, cell in enumerate(row[2:], 2):  # Start from column 2 (index 2)
+            if cell.strip():
+                try:
+                    seq = int(cell)
+                    seq_to_angle[seq] = angle
+                except ValueError:
+                    pass
+
+    if not seq_to_angle:
+        return []
+
+    # Execute in ascending step order (1,2,3...).
+    return [angle for _, angle in sorted(seq_to_angle.items())]
 
 
 class Open3DViewer:
@@ -276,6 +322,127 @@ class Open3DViewer:
 
     def close(self) -> None:
         self.vis.destroy_window()
+
+
+def wait_for_latest_imu(
+    events: "queue.Queue[object]", timeout_s: float, verbose: bool = False
+) -> ImuData:
+    deadline = time.monotonic() + timeout_s
+    last_imu: Optional[ImuData] = None
+    while time.monotonic() < deadline:
+        remain = max(0.01, deadline - time.monotonic())
+        try:
+            event = events.get(timeout=min(0.2, remain))
+        except queue.Empty:
+            continue
+        if isinstance(event, ImuData):
+            last_imu = event
+            if verbose:
+                print(
+                    f"[imu] pitch={event.pitch:.2f} roll={event.roll:.2f} yaw={event.yaw:.2f}",
+                    flush=True,
+                )
+            return event
+        if isinstance(event, ValueError):
+            print(f"[warn] {event}", file=sys.stderr)
+    if last_imu is not None:
+        return last_imu
+    raise TimeoutError("no IMU packet received before timeout")
+
+
+def run_imu_settle_bench(ser, events: "queue.Queue[object]", args: argparse.Namespace) -> None:
+    targets: list[float] = []
+    for _ in range(args.bench_cycles):
+        targets.append(args.bench_max)
+        targets.append(args.bench_min)
+
+    if not targets:
+        print("[bench] no move scheduled", flush=True)
+        return
+
+    # Warm-up: ensure IMU stream is flowing and capture a baseline.
+    baseline = wait_for_latest_imu(events, timeout_s=max(1.0, args.timeout), verbose=args.verbose)
+    print(
+        f"[bench] start roll={baseline.roll:.2f} deg moves={len(targets)} "
+        f"window={args.bench_window_ms}ms p2p<={args.bench_peak2peak:.2f}deg",
+        flush=True,
+    )
+
+    settled_times: list[float] = []
+    failed = 0
+    window_s = max(0.05, args.bench_window_ms / 1000.0)
+
+    for idx, target in enumerate(targets, start=1):
+        before = wait_for_latest_imu(events, timeout_s=max(1.0, args.timeout), verbose=args.verbose)
+        start_roll = before.roll
+        send_manual_tilt(ser, target)
+
+        t0 = time.monotonic()
+        samples: list[tuple[float, float]] = []
+        moved = False
+        stable_start: Optional[float] = None
+        settled: Optional[float] = None
+
+        while True:
+            elapsed = time.monotonic() - t0
+            if elapsed > args.bench_timeout:
+                break
+
+            event = wait_for_latest_imu(events, timeout_s=0.4, verbose=args.verbose)
+            t = time.monotonic() - t0
+            samples.append((t, event.roll))
+
+            if not moved and abs(event.roll - start_roll) >= args.bench_min_move:
+                moved = True
+
+            if not moved:
+                continue
+
+            window = [roll for ts, roll in samples if (t - ts) <= window_s]
+            if len(window) < 3:
+                continue
+
+            peak2peak = max(window) - min(window)
+            drift = abs(window[-1] - window[0])
+            if peak2peak <= args.bench_peak2peak and drift <= args.bench_peak2peak * 0.5:
+                if stable_start is None:
+                    stable_start = t
+                elif (t - stable_start) >= window_s:
+                    settled = t
+                    break
+            else:
+                stable_start = None
+
+        if settled is None:
+            failed += 1
+            print(
+                f"[bench] {idx}/{len(targets)} target={target:+.1f} deg timeout "
+                f"(>{args.bench_timeout:.2f}s)",
+                flush=True,
+            )
+        else:
+            settled_times.append(settled)
+            print(
+                f"[bench] {idx}/{len(targets)} target={target:+.1f} deg settled={settled:.3f}s",
+                flush=True,
+            )
+
+    # Return to neutral after benchmark.
+    send_manual_tilt(ser, 0.0)
+
+    if not settled_times:
+        print("[bench] no successful settle measurement", flush=True)
+        return
+
+    arr = np.array(settled_times, dtype=np.float64)
+    p90 = float(np.percentile(arr, 90))
+    reco_ms = int(math.ceil(p90 * 1000.0 + 50.0))
+    print(
+        f"[bench] summary ok={len(settled_times)}/{len(targets)} fail={failed} "
+        f"mean={arr.mean():.3f}s median={np.median(arr):.3f}s p90={p90:.3f}s max={arr.max():.3f}s",
+        flush=True,
+    )
+    print(f"[bench] recommended_settle_ms={reco_ms}", flush=True)
 
 
 def send_manual_tilt(ser, angle: float) -> None:
@@ -313,66 +480,129 @@ def collect_scan(args: argparse.Namespace) -> np.ndarray:
 
     points = np.empty((0, 3), dtype=np.float64)
     viewer = None
-    if not args.no_viz:
+    if not args.no_viz and not args.imu_bench:
         try:
             viewer = Open3DViewer()
         except Exception as exc:  # pragma: no cover - depends on desktop runtime
             print(f"[viz] Open3D disabled: {exc}", file=sys.stderr)
 
     try:
+        if args.imu_bench:
+            run_imu_settle_bench(ser, events, args)
+            return points
+
         if args.manual_tilt is not None:
             send_manual_tilt(ser, args.manual_tilt)
             print(f"[servo] tilt command sent: {args.manual_tilt:.2f} deg")
             time.sleep(0.2)
             return points
 
-        send_scan_start(ser, args.tilt_min, args.tilt_max, args.step)
-        complete = False
-        last_message = time.monotonic()
-        while not complete:
-            try:
-                event = events.get(timeout=0.2)
-            except queue.Empty:
-                if time.monotonic() - last_message > args.timeout:
-                    raise TimeoutError("no scanner data received before timeout")
-                if viewer is not None:
-                    viewer.update(points)
-                continue
-
+        if args.linear_scan:
+            # Original linear scan
+            send_scan_start(ser, args.tilt_min, args.tilt_max, args.step)
+            complete = False
             last_message = time.monotonic()
-            if isinstance(event, ValueError):
-                print(f"[warn] {event}", file=sys.stderr)
-            elif isinstance(event, ImuData):
-                if args.verbose:
+            while not complete:
+                try:
+                    event = events.get(timeout=0.2)
+                except queue.Empty:
+                    if time.monotonic() - last_message > args.timeout:
+                        raise TimeoutError("no scanner data received before timeout")
+                    if viewer is not None:
+                        viewer.update(points)
+                    continue
+
+                last_message = time.monotonic()
+                if isinstance(event, ValueError):
+                    print(f"[warn] {event}", file=sys.stderr)
+                elif isinstance(event, ImuData):
+                    if args.verbose:
+                        print(
+                            f"[imu] pitch={event.pitch:.2f} roll={event.roll:.2f} yaw={event.yaw:.2f}",
+                            flush=True,
+                        )
+                elif isinstance(event, ScanStatus):
+                    print_status(event)
+                    complete = event.state == 2
+                elif isinstance(event, ScanSlice):
+                    pts = transform_slice_to_3d(
+                        event.angles_deg,
+                        event.dists_mm,
+                        event.tilt_deg,
+                        event.imu_pitch_deg,
+                        event.imu_roll_deg,
+                        min_dist_mm=args.min_dist,
+                        max_dist_mm=args.max_dist,
+                        min_quality=args.min_quality,
+                        qualities=event.qualities,
+                    )
+                    if len(pts):
+                        points = np.vstack([points, pts])
                     print(
-                        f"[imu] pitch={event.pitch:.2f} roll={event.roll:.2f} yaw={event.yaw:.2f}",
+                        f"[slice] tilt={event.tilt_deg:.2f} deg raw={len(event.dists_mm)} "
+                        f"accepted={len(pts)} total={len(points)}",
                         flush=True,
                     )
-            elif isinstance(event, ScanStatus):
-                print_status(event)
-                complete = event.state == 2
-            elif isinstance(event, ScanSlice):
-                pts = transform_slice_to_3d(
-                    event.angles_deg,
-                    event.dists_mm,
-                    event.tilt_deg,
-                    event.imu_pitch_deg,
-                    event.imu_roll_deg,
-                    min_dist_mm=args.min_dist,
-                    max_dist_mm=args.max_dist,
-                    min_quality=args.min_quality,
-                    qualities=event.qualities,
-                )
-                if len(pts):
-                    points = np.vstack([points, pts])
-                print(
-                    f"[slice] tilt={event.tilt_deg:.2f} deg raw={len(event.dists_mm)} "
-                    f"accepted={len(pts)} total={len(points)}",
-                    flush=True,
-                )
-                if viewer is not None:
-                    viewer.update(points)
-        return points
+                    if viewer is not None:
+                        viewer.update(points)
+            return points
+        else:
+            # Pattern scan
+            pattern_angles = load_scan_pattern(args.pattern_csv, args.mode)
+            print(f"[scan] loaded {len(pattern_angles)} angles from {args.pattern_csv} mode={args.mode}")
+
+            for i, angle in enumerate(pattern_angles):
+                print(f"[scan] step {i+1}/{len(pattern_angles)}: tilt={angle:.2f} deg")
+                send_scan_start(ser, angle, angle, 1.0)
+
+                timeout = time.monotonic() + max(2.0, args.timeout)
+                slice_received = False
+                scan_complete = False
+                while time.monotonic() < timeout and not (slice_received and scan_complete):
+                    try:
+                        event = events.get(timeout=0.1)
+                    except queue.Empty:
+                        continue
+
+                    if isinstance(event, ScanSlice):
+                        pts = transform_slice_to_3d(
+                            event.angles_deg,
+                            event.dists_mm,
+                            event.tilt_deg,
+                            event.imu_pitch_deg,
+                            event.imu_roll_deg,
+                            min_dist_mm=args.min_dist,
+                            max_dist_mm=args.max_dist,
+                            min_quality=args.min_quality,
+                            qualities=event.qualities,
+                        )
+                        if len(pts):
+                            points = np.vstack([points, pts])
+                        print(
+                            f"[slice] tilt={event.tilt_deg:.2f} deg raw={len(event.dists_mm)} "
+                            f"accepted={len(pts)} total={len(points)}",
+                            flush=True,
+                        )
+                        if viewer is not None:
+                            viewer.update(points)
+                        slice_received = True
+                    elif isinstance(event, ScanStatus):
+                        if args.verbose:
+                            print_status(event)
+                        scan_complete = event.state == 2
+                    elif isinstance(event, ValueError):
+                        print(f"[warn] {event}", file=sys.stderr)
+                    elif isinstance(event, ImuData):
+                        if args.verbose:
+                            print(
+                                f"[imu] pitch={event.pitch:.2f} roll={event.roll:.2f} yaw={event.yaw:.2f}",
+                                flush=True,
+                            )
+
+                if not slice_received:
+                    print(f"[warn] no slice received for angle {angle:.2f} deg", file=sys.stderr)
+
+            return points
     finally:
         try:
             send_scan_stop(ser)
@@ -407,12 +637,50 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="LiderModule 3D LiDAR scanner host")
     parser.add_argument("--port", default="/dev/ttyACM0", help="serial port")
     parser.add_argument("--baud", type=int, default=921600, help="USB CDC baud rate")
-    parser.add_argument("--tilt-min", type=float, default=-45.0, help="scan start tilt [deg]")
-    parser.add_argument("--tilt-max", type=float, default=45.0, help="scan end tilt [deg]")
-    parser.add_argument("--step", type=float, default=2.0, help="tilt step [deg]")
+    parser.add_argument("--pattern-csv", default="../計測パターン.csv", help="scan pattern CSV file")
+    parser.add_argument("--mode", choices=["下方", "上方"], default="下方", help="detection mode")
+    parser.add_argument("--tilt-min", type=float, default=-45.0, help="scan start tilt [deg] (linear mode)")
+    parser.add_argument("--tilt-max", type=float, default=45.0, help="scan end tilt [deg] (linear mode)")
+    parser.add_argument("--step", type=float, default=2.0, help="tilt step [deg] (linear mode)")
+    parser.add_argument("--linear-scan", action="store_true", help="use linear scan instead of CSV pattern")
     parser.add_argument("--save", help="output .ply or .csv path")
     parser.add_argument("--no-viz", action="store_true", help="disable live Open3D visualization")
     parser.add_argument("--manual-tilt", type=float, help="send one tilt angle command and exit")
+    parser.add_argument(
+        "--imu-bench",
+        action="store_true",
+        help="run fast IMU-only settle benchmark (LiDAR scan disabled)",
+    )
+    parser.add_argument(
+        "--bench-min", type=float, default=-45.0, help="bench swing min angle [deg]"
+    )
+    parser.add_argument(
+        "--bench-max", type=float, default=45.0, help="bench swing max angle [deg]"
+    )
+    parser.add_argument(
+        "--bench-cycles", type=int, default=4, help="bench cycles (max->min pairs)"
+    )
+    parser.add_argument(
+        "--bench-timeout", type=float, default=3.0, help="timeout per move [s]"
+    )
+    parser.add_argument(
+        "--bench-min-move",
+        type=float,
+        default=2.0,
+        help="minimum IMU roll change to detect motion [deg]",
+    )
+    parser.add_argument(
+        "--bench-window-ms",
+        type=int,
+        default=120,
+        help="stability window length [ms]",
+    )
+    parser.add_argument(
+        "--bench-peak2peak",
+        type=float,
+        default=1.2,
+        help="stability threshold: roll peak-to-peak in window [deg]",
+    )
     parser.add_argument("--min-dist", type=int, default=20, help="minimum accepted distance [mm]")
     parser.add_argument("--max-dist", type=int, default=12000, help="maximum accepted distance [mm]")
     parser.add_argument("--min-quality", type=int, default=0, help="minimum accepted LiDAR quality")
@@ -426,6 +694,15 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     if args.step <= 0:
         print("--step must be positive", file=sys.stderr)
+        return 2
+    if args.bench_cycles < 1:
+        print("--bench-cycles must be >= 1", file=sys.stderr)
+        return 2
+    if args.bench_window_ms < 50:
+        print("--bench-window-ms must be >= 50", file=sys.stderr)
+        return 2
+    if args.bench_timeout <= 0:
+        print("--bench-timeout must be positive", file=sys.stderr)
         return 2
 
     try:

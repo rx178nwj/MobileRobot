@@ -1,5 +1,7 @@
 # 3D LiDAR Scanner System — 要件定義・実装仕様書
 
+> 更新メモ (実機反映): 2026-04 時点の検証結果に基づき、IMUはDMPベース、LiDARモーターは必要時のみ起動、サーボUARTは起動時自動再試行の仕様を反映。
+
 ## 1. プロジェクト概要
 
 ### 1.1 目的
@@ -201,6 +203,7 @@ Offset  Size  Field
 - **ボード**: Seeed Studio XIAO ESP32-C3
 - **必須ライブラリ**:
   - `SCServo` — Feetech STS/SCS サーボ制御 (https://github.com/workloads/scservo)
+  - `MPU6050` — i2cdevlibベース DMPサポート版 (MotionApps20)
   - `Wire` — I2C (Arduino標準)
 - **ボード設定**:
   - USB CDC On Boot: **Enabled**
@@ -249,7 +252,9 @@ HardwareSerial LidarSerial(1);  // pins D2(RX)/D3(TX), 230400bps
 #define TILT_SAFE_LIMIT      50.0f  // サーボ保護上限
 
 // タイミング
-#define SETTLE_MS            120    // サーボ安定待ち [ms]
+#define SCAN_SETTLE_DISABLED   1    // 1: 安定待ちなしで即時計測
+#define SETTLE_MS_MIN        150    // 安定待ち有効時の最小待ち [ms]
+#define SETTLE_MS_MAX       1300    // 安定待ち有効時の最大待ち [ms]
 #define IMU_READ_MS           10    // IMU読み取り周期 (100Hz)
 #define IMU_SEND_MS           50    // IMU送信周期 (50Hz)
 ```
@@ -276,18 +281,28 @@ WAIT_H1 → WAIT_H2 → READ_CT → READ_LSN → READ_DATA → (処理) → WAIT
 
 **1スキャン完了検出**: CT の bit0 が 1 になった時、前回蓄積分を1スキャンとして確定。
 
-### 4.5 MPU6050 初期化・読み取り
+### 4.5 MPU6050 初期化・読み取り (DMP適用)
 
-- ジャイロ: ±250°/s (感度 131 LSB/°/s)
-- 加速度: ±2g (感度 16384 LSB/g)
-- DLPF: 44Hz (レジスタ 0x1A = 0x03)
-- 相補フィルタ: α=0.96 (ジャイロ重み96%、加速度4%)
+- 使用ライブラリ: `MPU6050_6Axis_MotionApps20`
+- I2C: 400kHz, アドレス `0x68`
+- 初期化フロー:
+  1. `mpu.initialize()`
+  2. `mpu.dmpInitialize()`
+  3. `mpu.setDMPEnabled(true)`
+  4. `dmpGetFIFOPacketSize()` を保持
+- 更新フロー:
+  - `dmpGetCurrentFIFOPacket()` で最新FIFOを取得
+  - `dmpGetQuaternion()`, `dmpGetGravity()`, `dmpGetYawPitchRoll()` で姿勢角を算出
+  - 送信は従来どおり `MSG_IMU_DATA = [pitch, roll, yaw] (float32 x3)`
 
 ```
-pitch = α × (pitch + gyro_y × dt) + (1-α) × atan2(ax, sqrt(ay²+az²))
-roll  = α × (roll  + gyro_x × dt) + (1-α) × atan2(ay, sqrt(ax²+az²))
-yaw  += gyro_z × dt   // ドリフトあり、参考値
+imuYaw   = ypr[0] * 180 / PI
+imuPitch = ypr[1] * 180 / PI
+imuRoll  = ypr[2] * 180 / PI
 ```
+
+注記:
+- 6軸DMPのため yaw は相対方位として扱う（磁気北の絶対方位ではない）。
 
 ### 4.6 3Dスキャン状態機械
 
@@ -298,7 +313,7 @@ S3D_IDLE ──(CMD_3DSCAN_START)──→ S3D_MOVING
                               setTiltAngle(current)
                                     │
                                     ▼
-                              S3D_SETTLING ──(SETTLE_MS経過)──→ S3D_CAPTURING
+                              S3D_SETTLING ──(待ち0ms)──→ S3D_CAPTURING
                                                                     │
                                                                     ▼
                                                               (scanComplete==true)
@@ -342,6 +357,7 @@ pos = constrain(pos, 0, 4095);
 ```
 
 > ESP32-C3はシングルコア (RISC-V) のため、すべてノンブロッキング処理が必須。
+> LiDAR受信処理はループ占有防止のため1回あたり処理バジェット（上限バイト数）を設ける。
 
 ---
 
@@ -498,14 +514,12 @@ x,y,z
 |---|---|
 | LiDAR回転速度 | 6Hz (デフォルト) |
 | 1スキャンあたりのポイント数 | ~667 (4000pts/s ÷ 6Hz) |
-| サーボ安定待ち | 120ms |
-| 1スライスの所要時間 | ~167ms (スキャン) + 120ms (安定) ≈ 287ms |
+| サーボ安定待ち | 0ms (高速検出プロファイル) |
+| 1スライスの所要時間 | サーボ移動中のLiDAR点も含めて即時取得 |
 
-| ステップ幅 | スライス数 | 合計ポイント (概算) | 所要時間 (概算) |
+| スキャン方式 | スライス数 | 合計ポイント (実測) | 所要時間 (実測) |
 |---|---|---|---|
-| 2° | 46 | ~31K | ~13s |
-| 1° | 91 | ~61K | ~26s |
-| 0.5° | 181 | ~121K | ~52s |
+| 下方24ステップ × 5周 | 120 | raw=14518 / nonzero=12379 | 46.8s |
 
 ### 6.2 USB CDC帯域
 
@@ -562,12 +576,14 @@ matplotlib>=3.5
 ### 8.2 サーボ制御の注意
 
 - STS3215 のUARTは**半二重**。ReadPos/ReadLoad等のフィードバック読み取りは3Dスキャン中は行わない（スライス間に限定）。
-- サーボ位置はエンコーダで保証されるが、移動後の振動が収まるまで120ms以上待つ。
+- 本番の障害物検出では確率的取得を優先し、サーボ安定待ちは行わない。サーボ移動中のLiDAR点も有効な検出候補として扱う。
 - `st.WritePosEx(id, position, time, speed, acc)` — time=0 で即時移動。
+- 起動時にサーボ応答がない場合、UART0ピン割り当てを入れ替えて再初期化する自動再試行を実装済み。
+- サーボIDは `SERVO_ID_TILT=1` を優先し、未応答時はID探索を行う。
 
 ### 8.3 LiDARデータの注意
 
-- T-mini Pro は電源投入後、モーターが安定するまで数秒かかる。`0xA5 0x60` でスキャン開始コマンド送信。
+- T-mini Pro は `startScan` 時に `0xA5 0x60` でモーター起動し、`stopScan/scanComplete` 時に `0xA5 0x65` で停止する。
 - スキャンデータに距離0のポイントが含まれる場合がある → `dist_mm > 20` でフィルタ。
 - 周囲光が強い環境ではquality値が低下。quality でフィルタする場合は閾値10程度。
 
@@ -576,6 +592,7 @@ matplotlib>=3.5
 - `Serial` 接続時に DTR/RTS を `False` にしないと ESP32-C3 がリセットされる。
 - USB CDC のバッファオーバーフロー対策: `ser.read(512)` でチャンクリード。
 - Open3D の `Visualizer` はメインスレッドで実行する必要がある。データ受信はバックグラウンドスレッド。
+- ファームのUSBテキストデバッグモード有効時はバイナリプロトコルを抑止するため、通常の `rpi_tilt_3d.py` 連携は無効になる。運用時はテキストデバッグを無効化する。
 
 ### 8.5 座標変換の注意
 
@@ -591,7 +608,7 @@ matplotlib>=3.5
 
 1. **サーボ単体テスト**: Arduino IDEのシリアルモニタから `j`/`k` でサーボ動作確認 (SCServoサンプル)
 2. **LiDAR単体テスト**: UART1からデータ受信できることを確認 (パケットヘッダ 0xAA 0x55 の検出)
-3. **IMU単体テスト**: I2Cスキャンで0x68検出、pitch/roll値がシリアルモニタに出力されることを確認
+3. **IMU単体テスト**: I2Cスキャンで0x68検出、DMP初期化成功後に yaw/pitch/roll が更新されることを確認
 4. **USB CDC テスト**: RPiに接続し `/dev/ttyACM0` が認識されること、`pyserial` で通信できること
 
 ### 9.2 統合テスト
@@ -605,7 +622,7 @@ matplotlib>=3.5
 
 - チェックサムエラー率が0.1%以下であること
 - スライス間のチルト角度が等間隔であること (サーボフィードバックで確認)
-- IMU pitch/roll が静止時 ±0.5°以内であること
+- IMU pitch/roll が静止時 ±0.5°程度に収まり、yaw が連続性を持って更新されること
 - ポイントクラウドが空間的に整合していること (壁が直線、床が平面に見えるか)
 
 ---
