@@ -1,0 +1,71 @@
+<mxfile host="app.diagrams.net" modified="2026-04-25T00:00:00.000Z" agent="codex" version="24.7.17" editor="draw.io">
+  <diagram id="LiderModuleSoftwareSystemDetailed" name="LiderModule Detailed (File-Class-Function)">
+    <mxGraphModel dx="1920" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2200" pageHeight="1600" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="title" value="LiderModule Software System - Detailed Mapping (File / Class / Function)" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;fontSize=22;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="10" width="1000" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="note" value="Policy: LiderModule firmware = accurate sensing/timing. Raspberry Pi host = reconstruction/visualization/decision." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;" vertex="1" parent="1">
+          <mxGeometry x="20" y="50" width="2160" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="firmware" value="firmware/lidar_tilt_3d/lidar_tilt_3d.ino&#xa;&#xa;Core / Protocol&#xa;- checksum(), writeU16(), writeF32(), readF32()&#xa;- sendFrame(), sendStatus()&#xa;&#xa;Servo / IMU&#xa;- angleToServoPos(), setTiltAngle(), servoPosToAngle()&#xa;- readServoTilt(), initServo(), probeServoId()&#xa;- initImu(), updateImu(), sendImu()&#xa;- debugServoImuStatus()&#xa;&#xa;LiDAR / Slice&#xa;- resetLidarScan(), rawAngleDeg(), processLidarPacket()&#xa;- lidarStartMotor(), lidarStopMotor(), pollLidar()&#xa;- sendScanSlice()&#xa;&#xa;Scan State Machine&#xa;- computeSettleMs(), computeTotalSteps(), updateSweepCommand()&#xa;- startScan(), stopScan(), updateScanState()&#xa;- handleCommand(), pollUsbCommands()&#xa;&#xa;Entry&#xa;- setup(), loop()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#0B5394;align=left;verticalAlign=top;spacingLeft=8;spacingTop=6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="20" y="120" width="700" height="700" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="rpi_main" value="host/rpi_tilt_3d.py&#xa;&#xa;Data classes&#xa;- ImuData, ScanStatus, ScanSlice&#xa;&#xa;Protocol / Frame&#xa;- frame_checksum(), encode_frame(), decode_payload()&#xa;- FrameReader.__init__(), FrameReader.run()&#xa;&#xa;Math / Transform&#xa;- rx_matrix(), ry_matrix(), transform_slice_to_3d()&#xa;- colors_from_z()&#xa;&#xa;I/O / Export&#xa;- save_csv(), save_ply(), save_points()&#xa;- load_scan_pattern()&#xa;&#xa;Visualization helper&#xa;- Open3DViewer.__init__(), update(), close()&#xa;&#xa;Control / CLI&#xa;- wait_for_latest_imu(), run_imu_settle_bench()&#xa;- send_manual_tilt(), send_scan_start(), send_scan_stop()&#xa;- print_status(), collect_scan(), plot_matplotlib()&#xa;- build_parser(), main()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#38761D;align=left;verticalAlign=top;spacingLeft=8;spacingTop=6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="760" y="120" width="700" height="700" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="live_viewer" value="host/live_scan_viewer.py&#xa;&#xa;Data / Buffer&#xa;- LiveStats&#xa;- RollingPointBuffer.__init__(), append(), stacked(), clear()&#xa;&#xa;UI&#xa;- MatplotlibLiveViewer.__init__(), update(), close(), set_clear_callback()&#xa;- MatplotlibLiveViewer._set_axes_equal(), _height_profile()&#xa;&#xa;Runtime&#xa;- sample_for_render(), run_live()&#xa;- build_parser(), main()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#38761D;align=left;verticalAlign=top;spacingLeft=8;spacingTop=6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1500" y="120" width="680" height="300" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="viz_result" value="host/visualize_scan_result.py&#xa;&#xa;Loaders&#xa;- load_csv_points(), load_ascii_ply_points(), load_points()&#xa;&#xa;Utility&#xa;- sample_points(), summarize(), set_axes_equal()&#xa;&#xa;Backends&#xa;- show_matplotlib(), show_open3d()&#xa;&#xa;CLI&#xa;- build_parser(), main()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#38761D;align=left;verticalAlign=top;spacingLeft=8;spacingTop=6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1500" y="440" width="680" height="220" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="hazard" value="host/downward_hazard_monitor.py&#xa;&#xa;Data / Buffer&#xa;- HazardResult&#xa;- RollingPointBuffer.__init__(), append(), stacked()&#xa;&#xa;Detection&#xa;- compute_hazard(), render_summary()&#xa;&#xa;Runtime&#xa;- run_monitor()&#xa;&#xa;CLI&#xa;- build_parser(), main()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#38761D;align=left;verticalAlign=top;spacingLeft=8;spacingTop=6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1500" y="680" width="680" height="220" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="tests" value="host/test_protocol.py&#xa;&#xa;Test class&#xa;- ProtocolTests(unittest.TestCase)&#xa;&#xa;Cases&#xa;- test_frame_round_trip_for_status()&#xa;- test_scan_slice_decode()&#xa;- test_scan_slice_decode_extended_tilt_sync()&#xa;- test_transform_filters_and_projects()&#xa;- test_tilt_projection()&#xa;- test_tilt_projection_with_tilt_series()&#xa;- test_tilt_axis_offset_applied()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;align=left;verticalAlign=top;spacingLeft=8;spacingTop=6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="760" y="840" width="700" height="280" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="flow1" value="USB CDC 0x02/0x04/0x05 data" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#6A329F;endArrow=block;endFill=1;fontSize=11;" edge="1" parent="1" source="firmware" target="rpi_main">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="flow2" value="Commands 0x10/0x12/0x13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#6A329F;startArrow=block;startFill=1;fontSize=11;" edge="1" parent="1" source="firmware" target="rpi_main">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="740" y="260"/>
+              <mxPoint x="740" y="230"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="flow3" value="imports / shared protocol funcs" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#38761D;endArrow=block;endFill=1;fontSize=11;" edge="1" parent="1" source="rpi_main" target="live_viewer">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="flow4" value="saved PLY/CSV" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#38761D;endArrow=block;endFill=1;fontSize=11;" edge="1" parent="1" source="rpi_main" target="viz_result">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="flow5" value="imports transport/transform" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#38761D;endArrow=block;endFill=1;fontSize=11;" edge="1" parent="1" source="rpi_main" target="hazard">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="flow6" value="unit-test target module" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#D6B656;endArrow=block;endFill=1;fontSize=11;" edge="1" parent="1" source="tests" target="rpi_main">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

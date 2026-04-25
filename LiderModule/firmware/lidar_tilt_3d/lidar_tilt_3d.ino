@@ -3,13 +3,13 @@
 #include <SCServo.h>
 #include "MPU6050_6Axis_MotionApps20.h"
 
-// Pins: Seeed XIAO ESP32-C3
-#define LIDAR_RXD 4
-#define LIDAR_TXD 5
-#define IMU_SDA 6
-#define IMU_SCL 7
-#define SERVO_RXD 21
-#define SERVO_TXD 20
+// Pins: Seeed XIAO ESP32-S3
+#define LIDAR_RXD 3
+#define LIDAR_TXD 4
+#define IMU_SDA 5
+#define IMU_SCL 6
+#define SERVO_RXD 44
+#define SERVO_TXD 43
 
 #define MPU6050_ADDR 0x68
 #define SERVO_ID_TILT 1
@@ -47,6 +47,11 @@
 #define MAX_PROTO_PAYLOAD 4096
 #define CAPTURE_TIMEOUT_MS 110
 #define CAPTURE_MIN_POINTS 25
+#define SWEEP_PREPARE_MS 120
+#define SWEEP_FINALIZE_MS 500
+#define SWEEP_LIDAR_REV_HZ 6.0f
+#define SWEEP_SPEED_MIN_DPS 4.0f
+#define SWEEP_SPEED_MAX_DPS 80.0f
 // Human-readable USB debug mode.
 // 1: Print IMU + servo ReadPos as text and suppress binary TX frames.
 // 0: Normal binary protocol behavior.
@@ -84,10 +89,9 @@ static float dmpYpr[3];
 
 enum Scan3DState {
   S3D_IDLE,
-  S3D_MOVING,
-  S3D_SETTLING,
-  S3D_CAPTURING,
-  S3D_SENDING,
+  S3D_PREPARE,
+  S3D_SWEEPING,
+  S3D_FINALIZING,
   S3D_COMPLETE
 };
 
@@ -100,6 +104,12 @@ static uint16_t stepIndex = 0;
 static uint16_t totalSteps = 0;
 static uint32_t stateStartedMs = 0;
 static uint32_t settleMsCurrent = SETTLE_MS_MIN;
+static float captureTiltStart = 0.0f;
+static float captureTiltEnd = 0.0f;
+static float sweepSpeedDps = 0.0f;
+static int8_t sweepDirection = 1;
+static uint32_t lastSweepUpdateMs = 0;
+static uint16_t slicesSent = 0;
 
 static uint8_t rxFrame[128];
 static uint16_t rxIndex = 0;
@@ -112,6 +122,7 @@ static uint16_t lidarIndex = 0;
 static uint16_t lidarExpected = 0;
 static uint8_t lidarState = 0;
 static bool lidarMotorOn = false;
+static int8_t probeServoId();
 
 static uint8_t checksum(uint8_t type, uint16_t len, const uint8_t *payload) {
   uint8_t cs = type ^ (uint8_t)(len & 0xFF) ^ (uint8_t)(len >> 8);
@@ -173,6 +184,31 @@ static void setTiltAngle(float angleDeg) {
   currentTilt = constrain(angleDeg, -TILT_SAFE_LIMIT, TILT_SAFE_LIMIT);
   int pos = angleToServoPos(currentTilt);
   servo.WritePosEx(servoTxId, pos, 1800, 50);
+}
+
+static float servoPosToAngle(int pos) {
+  return ((float)(pos - SERVO_CENTER)) * 360.0f / (4096.0f * (float)SERVO_DIRECTION);
+}
+
+static bool readServoTilt(float *angleDegOut) {
+  uint32_t nowMs = millis();
+  if (servoReadId < 0 && (nowMs - lastServoProbeMs >= 2000)) {
+    lastServoProbeMs = nowMs;
+    servoReadId = probeServoId();
+  }
+
+  if (servoReadId < 0) {
+    return false;
+  }
+
+  int pos = servo.ReadPos(servoReadId);
+  if (pos < 0) {
+    servoReadId = -1;
+    return false;
+  }
+
+  *angleDegOut = constrain(servoPosToAngle(pos), -TILT_SAFE_LIMIT, TILT_SAFE_LIMIT);
+  return true;
 }
 
 static void initServo() {
@@ -304,6 +340,10 @@ static float rawAngleDeg(uint16_t raw) {
 }
 
 static void processLidarPacket(const uint8_t *pkt, uint16_t len) {
+  if (scanReady) {
+    // Drop incoming packets until host side consumes the completed slice.
+    return;
+  }
   if (len < 10) {
     return;
   }
@@ -315,6 +355,10 @@ static void processLidarPacket(const uint8_t *pkt, uint16_t len) {
 
   bool newScan = (ct & 0x01) != 0;
   if (newScan && scanCount > 0) {
+    captureTiltEnd = currentTilt;
+    if (!readServoTilt(&captureTiltEnd)) {
+      captureTiltEnd = currentTilt;
+    }
     scanReady = true;
     return;
   }
@@ -327,6 +371,13 @@ static void processLidarPacket(const uint8_t *pkt, uint16_t len) {
   }
 
   for (uint8_t i = 0; i < lsn && scanCount < MAX_SCAN_POINTS; i++) {
+    if (scanCount == 0 && i == 0) {
+      captureTiltStart = currentTilt;
+      if (!readServoTilt(&captureTiltStart)) {
+        captureTiltStart = currentTilt;
+      }
+      captureTiltEnd = captureTiltStart;
+    }
     const uint8_t *s = pkt + 10 + i * 3;
     float angle = start + (lsn > 1 ? span * i / (float)(lsn - 1) : 0.0f);
     while (angle >= 360.0f) {
@@ -336,6 +387,13 @@ static void processLidarPacket(const uint8_t *pkt, uint16_t len) {
     scanPoints[scanCount].dist_mm = (uint16_t)s[1] | ((uint16_t)s[2] << 8);
     scanPoints[scanCount].quality = s[0];
     scanCount++;
+  }
+
+  if (scanCount > 0) {
+    captureTiltEnd = currentTilt;
+    if (!readServoTilt(&captureTiltEnd)) {
+      captureTiltEnd = currentTilt;
+    }
   }
 }
 
@@ -397,19 +455,21 @@ static void pollLidar() {
 
 static void sendScanSlice() {
   uint16_t count = scanCount;
-  uint16_t len = 14 + count * 5;
+  uint16_t len = 22 + count * 5;
   if (len > MAX_PROTO_PAYLOAD) {
-    count = (MAX_PROTO_PAYLOAD - 14) / 5;
-    len = 14 + count * 5;
+    count = (MAX_PROTO_PAYLOAD - 22) / 5;
+    len = 22 + count * 5;
   }
 
   static uint8_t payload[MAX_PROTO_PAYLOAD];
   writeF32(payload + 0, currentTilt);
-  writeF32(payload + 4, imuPitch);
-  writeF32(payload + 8, imuRoll);
-  writeU16(payload + 12, count);
+  writeF32(payload + 4, captureTiltStart);
+  writeF32(payload + 8, captureTiltEnd);
+  writeF32(payload + 12, imuPitch);
+  writeF32(payload + 16, imuRoll);
+  writeU16(payload + 20, count);
   for (uint16_t i = 0; i < count; i++) {
-    uint8_t *p = payload + 14 + i * 5;
+    uint8_t *p = payload + 22 + i * 5;
     writeU16(p + 0, scanPoints[i].angle_x100);
     writeU16(p + 2, scanPoints[i].dist_mm);
     p[4] = scanPoints[i].quality;
@@ -443,6 +503,26 @@ static uint16_t computeTotalSteps(float minA, float maxA, float stepA) {
   return (uint16_t)(floorf((maxA - minA) / stepA + 0.5f) + 1);
 }
 
+static void updateSweepCommand() {
+  uint32_t nowMs = millis();
+  uint32_t dtMs = nowMs - lastSweepUpdateMs;
+  if (dtMs == 0) {
+    return;
+  }
+  lastSweepUpdateMs = nowMs;
+
+  float dt = (float)dtMs / 1000.0f;
+  float next = currentTilt + (float)sweepDirection * sweepSpeedDps * dt;
+  if (next > tiltMax) {
+    next = tiltMax;
+  }
+  if (next < tiltMin) {
+    next = tiltMin;
+  }
+  currentTilt = next;
+  setTiltAngle(currentTilt);
+}
+
 static void startScan(float minA, float maxA, float stepA) {
   tiltMin = constrain(minA, -TILT_SAFE_LIMIT, TILT_SAFE_LIMIT);
   tiltMax = constrain(maxA, -TILT_SAFE_LIMIT, TILT_SAFE_LIMIT);
@@ -456,11 +536,20 @@ static void startScan(float minA, float maxA, float stepA) {
   if (totalSteps == 0) {
     return;
   }
+  float spacing = stepA > 0.0f ? stepA : TILT_STEP_DEFAULT;
+  sweepSpeedDps = constrain(fabsf(spacing) * SWEEP_LIDAR_REV_HZ, SWEEP_SPEED_MIN_DPS, SWEEP_SPEED_MAX_DPS);
   lidarStartMotor();
   stepIndex = 0;
+  slicesSent = 0;
+  sweepDirection = 1;
   currentTilt = tiltMin;
-  scanState = S3D_MOVING;
+  setTiltAngle(currentTilt);
+  resetLidarScan();
+  captureTiltStart = currentTilt;
+  captureTiltEnd = currentTilt;
+  scanState = S3D_PREPARE;
   stateStartedMs = millis();
+  lastSweepUpdateMs = stateStartedMs;
   sendStatus(0, stepIndex, totalSteps);
 }
 
@@ -476,42 +565,49 @@ static void updateScanState() {
   switch (scanState) {
     case S3D_IDLE:
       break;
-    case S3D_MOVING:
-      {
-      float prevTilt = currentTilt;
-      currentTilt = tiltMin + stepIndex * tiltStep;
-      if (currentTilt > tiltMax) {
-        currentTilt = tiltMax;
-      }
-      settleMsCurrent = computeSettleMs(currentTilt - prevTilt);
-      setTiltAngle(currentTilt);
-      resetLidarScan();
-      stateStartedMs = millis();
-      scanState = S3D_SETTLING;
-      }
-      break;
-    case S3D_SETTLING:
-      if (millis() - stateStartedMs >= settleMsCurrent) {
+    case S3D_PREPARE:
+      if (millis() - stateStartedMs >= SWEEP_PREPARE_MS) {
         resetLidarScan();
+        lastSweepUpdateMs = millis();
+        scanState = S3D_SWEEPING;
+      }
+      break;
+    case S3D_SWEEPING:
+      updateSweepCommand();
+      if (scanReady) {
+        sendScanSlice();
+        resetLidarScan();
+        slicesSent++;
+        uint16_t progress = slicesSent;
+        if (progress > totalSteps) {
+          progress = totalSteps;
+        }
+        sendStatus(1, progress, totalSteps);
+      }
+      // Capture both directions:
+      //  1) up-sweep: tiltMin -> tiltMax
+      //  2) down-sweep: tiltMax -> tiltMin
+      if (sweepDirection > 0 && currentTilt >= (tiltMax - 0.01f)) {
+        sweepDirection = -1;
+      } else if (sweepDirection < 0 && currentTilt <= (tiltMin + 0.01f)) {
         stateStartedMs = millis();
-        scanState = S3D_CAPTURING;
+        scanState = S3D_FINALIZING;
       }
       break;
-    case S3D_CAPTURING:
-      if (scanReady ||
-          ((millis() - stateStartedMs >= CAPTURE_TIMEOUT_MS) &&
-           (scanCount >= CAPTURE_MIN_POINTS))) {
-        scanState = S3D_SENDING;
+    case S3D_FINALIZING:
+      setTiltAngle(tiltMin);
+      if (scanReady) {
+        sendScanSlice();
+        resetLidarScan();
+        slicesSent++;
+        uint16_t progress = slicesSent;
+        if (progress > totalSteps) {
+          progress = totalSteps;
+        }
+        sendStatus(1, progress, totalSteps);
       }
-      break;
-    case S3D_SENDING:
-      sendScanSlice();
-      sendStatus(1, stepIndex + 1, totalSteps);
-      stepIndex++;
-      if (stepIndex >= totalSteps) {
+      if (millis() - stateStartedMs >= SWEEP_FINALIZE_MS) {
         scanState = S3D_COMPLETE;
-      } else {
-        scanState = S3D_MOVING;
       }
       break;
     case S3D_COMPLETE:

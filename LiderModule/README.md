@@ -1,12 +1,17 @@
 # LiderModule
 
-LiderModule is a low-cost 3D LiDAR scanner module for a mobile robot. It tilts a 2D YDLIDAR T-mini Pro with a FEETECH STS3215 servo, reads MPU6050 attitude data on the ESP32-C3, and sends scan slices to a Raspberry Pi over USB CDC.
+LiderModule is a low-cost 3D LiDAR scanner module for a mobile robot. It tilts a 2D YDLIDAR T-mini Pro with a FEETECH STS3215 servo, reads MPU6050 attitude data on the ESP32-S3, and sends scan slices to a Raspberry Pi over USB CDC.
+
+Design policy:
+
+- LiderModule firmware focuses on sensing quality (LiDAR + tilt angle + IMU + timing consistency).
+- Environment understanding (step/hole detection, risk decision, vehicle action) is implemented on Raspberry Pi side.
 
 ## Implementation Status
 
 Implemented:
 
-- ESP32-C3 Arduino firmware in `firmware/lidar_tilt_3d/lidar_tilt_3d.ino`
+- ESP32-S3 Arduino firmware in `firmware/lidar_tilt_3d/lidar_tilt_3d.ino`
 - Raspberry Pi host CLI in `host/rpi_tilt_3d.py`
 - Binary USB CDC framing compatible with `SPEC.md`
 - IMU packets, 3D scan status packets, 3D scan slice packets
@@ -42,17 +47,17 @@ LiderModule/
 ## Firmware Setup
 
 1. Install Arduino IDE 2.x.
-2. Select `Seeed Studio XIAO ESP32-C3`.
+2. Select `Seeed Studio XIAO ESP32-S3`.
 3. Enable `USB CDC On Boot`.
 4. Install the `SCServo` library.
 5. Open `firmware/lidar_tilt_3d/lidar_tilt_3d.ino`.
-6. Upload to the XIAO ESP32-C3.
+6. Upload to the XIAO ESP32-S3.
 
 Important serial assignments:
 
 - `Serial`: USB CDC to Raspberry Pi
-- `Serial0`: STS3215 servo bus, 1 Mbps, GPIO21 RX / GPIO20 TX
-- `LidarSerial`: YDLIDAR, 230400 bps, GPIO4 RX / GPIO5 TX
+- `Serial0`: STS3215 servo bus, 1 Mbps, GPIO44 RX / GPIO43 TX
+- `LidarSerial`: YDLIDAR, 230400 bps, GPIO3 RX / GPIO4 TX
 
 ## Host Setup
 
@@ -63,7 +68,7 @@ python3 -m venv .venv
 pip install -r requirements.txt
 ```
 
-Default scan:
+Default scan (continuous sweep, no step-stop):
 
 ```bash
 python3 rpi_tilt_3d.py --port /dev/ttyACM0
@@ -80,6 +85,31 @@ Save CSV without visualization:
 ```bash
 python3 rpi_tilt_3d.py --step 2 --save scan.csv --no-viz
 ```
+
+Visualize saved result (.csv / .ply):
+
+```bash
+python3 host/visualize_scan_result.py scan.ply --mode matplotlib
+python3 host/visualize_scan_result.py scan.csv --mode both --equal-axis
+python3 host/visualize_scan_result.py scan.ply --save-png scan_summary.png --no-show
+```
+
+Continuous live visualization (for remote desktop):
+
+```bash
+python3 host/live_scan_viewer.py --port /dev/ttyACM0 --tilt-min -45 --tilt-max 45 --step 2 --equal-axis --auto-recover
+```
+
+`live_scan_viewer.py` のウィンドウ右下に `Clear` ボタンがあり、押すと表示中の点群だけをクリアします（計測は継続）。
+同ウィンドウには `Height-wise Y Graph (Y-Z)` が追加され、高さ(Z)ごとのY分布を確認できます。
+
+Downward hazard monitoring example on Raspberry Pi side:
+
+```bash
+python3 host/downward_hazard_monitor.py --port /dev/ttyACM1 --tilt-min -45 --tilt-max 0 --step 2 --duration-sec 20 --save-png downward_hazard_summary.png
+```
+
+This mode continuously scans the downward sector and prints hazard status (`SAFE` / `STEP_DOWN` / `HOLE`) while running.
 
 Manual tilt test:
 
@@ -100,7 +130,7 @@ The checksum is XOR of `TYPE`, `LEN_L`, `LEN_H`, and all payload bytes.
 Device to host:
 
 - `0x02`: IMU data, `<float pitch><float roll><float yaw>`
-- `0x04`: scan slice, `<float tilt><float imu_pitch><float imu_roll><uint16 count><points...>`
+- `0x04`: scan slice, `<float tilt_cmd><float tilt_start><float tilt_end><float imu_pitch><float imu_roll><uint16 count><points...>`
 - `0x05`: scan status, `<uint8 state><uint16 step><uint16 total>`
 
 Host to device:

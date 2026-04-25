@@ -20,7 +20,7 @@
 | flow control | none |
 | DTR / RTS | `False` 推奨 |
 
-Raspberry Pi 側では `pyserial` を使う場合、ESP32-C3 の不要なリセットを避けるため、open 後に `dtr` と `rts` を `False` にしてください。
+Raspberry Pi 側では `pyserial` を使う場合、ESP32-S3 の不要なリセットを避けるため、open 後に `dtr` と `rts` を `False` にしてください。
 
 ```python
 import serial
@@ -103,7 +103,7 @@ send_frame(ser, 0x10, struct.pack("<f", 0.0))
 
 ### 4.2 `0x12` 3D Scan Start
 
-サーボを指定範囲で動かし、各チルト角でLiDARスライスを送信します。
+サーボを指定範囲で**連続スイープ**しながらLiDARスライスを送信します（ステップ停止なし）。
 
 | 項目 | 値 |
 |---|---|
@@ -125,7 +125,8 @@ offset  size  type  name
 - `tilt_min` / `tilt_max` は `-50.0` から `+50.0` degree に制限されます。
 - `tilt_max < tilt_min` の場合、ファーム側で入れ替えます。
 - `tilt_step <= 0` の場合、デフォルト値を使います。
-- 本番プロファイルではサーボ安定待ちは行わず、移動中のLiDAR点も含めて取得します。
+- サーボは `tilt_min -> tilt_max` を連続掃引し、移動中のLiDAR点をそのまま取得します。
+- `tilt_step` は「停止ステップ」ではなく、実質的にスイープ速度の目安として使われます（値が大きいほど速い）。
 - スキャン開始時にLiDARモーターを起動し、完了/停止時に停止します。
 
 単発スライス:
@@ -191,22 +192,25 @@ offset  size  type  name
 
 ### 5.2 `0x04` 3D Scan Slice
 
-1チルト角で取得したLiDAR点群スライスです。
+1回転分のLiDAR点群スライスです。高速モードではサーボ動作中の点を含むため、
+スライス内で `tilt_start_deg -> tilt_end_deg` を補間して螺旋状に再構成してください。
 
 | 項目 | 値 |
 |---|---|
 | Type | `0x04` |
 | Payload | header + points |
-| Payload length | `14 + count * 5` |
+| Payload length | `22 + count * 5` (拡張) / `14 + count * 5` (旧互換) |
 
 Payload header:
 
 ```text
 offset  size  type  name
-0       4     f32   tilt_deg
-4       4     f32   imu_pitch_deg
-8       4     f32   imu_roll_deg
-12      2     u16   count
+0       4     f32   tilt_deg (このスライスの目標チルト)
+4       4     f32   tilt_start_deg (取得開始時の実角)
+8       4     f32   tilt_end_deg   (取得終了時の実角)
+12      4     f32   imu_pitch_deg
+16      4     f32   imu_roll_deg
+20      2     u16   count
 ```
 
 Point format, repeated `count` times:
@@ -224,6 +228,18 @@ Point conversion:
 angle_deg = angle_x100 / 100.0
 distance_m = dist_mm / 1000.0
 ```
+
+螺旋同期の推奨:
+
+```python
+# N点のとき、各点のチルトを線形補間
+tilt_series = np.linspace(tilt_start_deg, tilt_end_deg, num=N)
+```
+
+旧ファーム互換:
+
+- 旧フォーマットは `tilt_deg / imu_pitch_deg / imu_roll_deg / count` のみ (`14 + count*5`)。
+- 旧フォーマット受信時は `tilt_start_deg = tilt_end_deg = tilt_deg` として扱ってください。
 
 Filtering recommendation:
 

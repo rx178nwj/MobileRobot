@@ -32,6 +32,8 @@ MSG_SCAN_STATUS = 0x05
 CMD_SERVO_ANGLE = 0x10
 CMD_SCAN_START = 0x12
 CMD_SCAN_STOP = 0x13
+DEFAULT_TILT_AXIS_OFFSET_MM = 23.0
+DEFAULT_PATTERN_CSV = str((Path(__file__).resolve().parent.parent / "計測パターン.csv"))
 
 
 @dataclass
@@ -51,6 +53,8 @@ class ScanStatus:
 @dataclass
 class ScanSlice:
     tilt_deg: float
+    tilt_start_deg: float
+    tilt_end_deg: float
     imu_pitch_deg: float
     imu_roll_deg: float
     angles_deg: np.ndarray
@@ -87,11 +91,36 @@ def decode_payload(msg_type: int, payload: bytes):
     if msg_type == MSG_SCAN_SLICE:
         if len(payload) < 14:
             raise ValueError(f"bad slice payload length: {len(payload)}")
-        tilt, imu_pitch, imu_roll, count = struct.unpack_from("<fffH", payload, 0)
-        expected = 14 + count * 5
-        if len(payload) != expected:
-            raise ValueError(f"bad slice payload length: {len(payload)} != {expected}")
-        raw = payload[14:]
+        if len(payload) >= 22:
+            # New format: include servo-synchronized start/end tilt for each LiDAR turn.
+            tilt_x, tilt_start_x, tilt_end_x, imu_pitch_x, imu_roll_x, count_x = struct.unpack_from("<fffffH", payload, 0)
+            expected_x = 22 + count_x * 5
+            if len(payload) == expected_x:
+                tilt = tilt_x
+                tilt_start = tilt_start_x
+                tilt_end = tilt_end_x
+                imu_pitch = imu_pitch_x
+                imu_roll = imu_roll_x
+                count = count_x
+                raw = payload[22:]
+            else:
+                # Fall back to the legacy format if extended length does not match.
+                tilt, imu_pitch, imu_roll, count = struct.unpack_from("<fffH", payload, 0)
+                expected = 14 + count * 5
+                if len(payload) != expected:
+                    raise ValueError(f"bad slice payload length: {len(payload)} != {expected}")
+                raw = payload[14:]
+                tilt_start = tilt
+                tilt_end = tilt
+        else:
+            # Backward compatible format.
+            tilt, imu_pitch, imu_roll, count = struct.unpack_from("<fffH", payload, 0)
+            expected = 14 + count * 5
+            if len(payload) != expected:
+                raise ValueError(f"bad slice payload length: {len(payload)} != {expected}")
+            raw = payload[14:]
+            tilt_start = tilt
+            tilt_end = tilt
         angles = np.empty(count, dtype=np.float64)
         dists = np.empty(count, dtype=np.uint16)
         qualities = np.empty(count, dtype=np.uint8)
@@ -100,7 +129,7 @@ def decode_payload(msg_type: int, payload: bytes):
             angles[i] = angle_x100 / 100.0
             dists[i] = dist_mm
             qualities[i] = quality
-        return ScanSlice(tilt, imu_pitch, imu_roll, angles, dists, qualities)
+        return ScanSlice(tilt, tilt_start, tilt_end, imu_pitch, imu_roll, angles, dists, qualities)
 
     return payload
 
@@ -171,7 +200,8 @@ def ry_matrix(pitch_rad: float) -> np.ndarray:
 def transform_slice_to_3d(
     angles_deg: np.ndarray,
     dists_mm: np.ndarray,
-    tilt_deg: float,
+    tilt_deg: float | np.ndarray,
+    tilt_axis_offset_m: float = 0.0,
     imu_pitch_deg: float = 0.0,
     imu_roll_deg: float = 0.0,
     min_dist_mm: int = 20,
@@ -189,10 +219,25 @@ def transform_slice_to_3d(
     x_l = dists * np.cos(angles)
     y_l = dists * np.sin(angles)
 
-    tilt = math.radians(tilt_deg)
-    x = x_l * math.cos(tilt)
+    if np.isscalar(tilt_deg):
+        tilt = math.radians(float(tilt_deg))
+        cos_t = math.cos(tilt)
+        sin_t = math.sin(tilt)
+        off_x = tilt_axis_offset_m * sin_t
+        off_z = tilt_axis_offset_m * cos_t
+    else:
+        tilt_series = np.asarray(tilt_deg, dtype=np.float64)
+        if tilt_series.shape[0] != dists_mm.shape[0]:
+            raise ValueError("tilt_deg array length must match points length")
+        tilt = np.radians(tilt_series[mask])
+        cos_t = np.cos(tilt)
+        sin_t = np.sin(tilt)
+        off_x = tilt_axis_offset_m * sin_t
+        off_z = tilt_axis_offset_m * cos_t
+
+    x = x_l * cos_t + off_x
     y = y_l
-    z = -x_l * math.sin(tilt)
+    z = -x_l * sin_t + off_z
     pts = np.stack([x, y, z], axis=1)
 
     if abs(imu_pitch_deg) > 0.1 or abs(imu_roll_deg) > 0.1:
@@ -239,6 +284,18 @@ def save_ply(path: Path, points: np.ndarray) -> None:
                 f"{point[0]:.6f} {point[1]:.6f} {point[2]:.6f} "
                 f"{int(color[0])} {int(color[1])} {int(color[2])}\n"
             )
+
+
+def save_points(path_str: str, points: np.ndarray) -> None:
+    path = Path(path_str)
+    ext = path.suffix.lower()
+    if ext == ".ply":
+        save_ply(path, points)
+        return
+    if ext == ".csv":
+        save_csv(path, points)
+        return
+    raise ValueError(f"unsupported save format: {path.suffix} (use .ply or .csv)")
 
 
 def load_scan_pattern(csv_path: str, mode: str = "下方") -> list[float]:
@@ -487,6 +544,23 @@ def collect_scan(args: argparse.Namespace) -> np.ndarray:
             print(f"[viz] Open3D disabled: {exc}", file=sys.stderr)
 
     try:
+        imu_ref_pitch: Optional[float] = None
+        imu_ref_roll: Optional[float] = None
+
+        def get_imu_correction(sl: ScanSlice) -> tuple[float, float]:
+            nonlocal imu_ref_pitch, imu_ref_roll
+            tilt_mid = 0.5 * (sl.tilt_start_deg + sl.tilt_end_deg)
+            if imu_ref_pitch is None and abs(tilt_mid) <= args.imu_ref_tilt_threshold_deg:
+                imu_ref_pitch = sl.imu_pitch_deg
+                imu_ref_roll = sl.imu_roll_deg
+                print(
+                    f"[imu] reference locked at tilt~0: pitch={imu_ref_pitch:.2f} roll={imu_ref_roll:.2f}",
+                    flush=True,
+                )
+            if imu_ref_pitch is None:
+                return 0.0, 0.0
+            return imu_ref_pitch, imu_ref_roll
+
         if args.imu_bench:
             run_imu_settle_bench(ser, events, args)
             return points
@@ -525,12 +599,20 @@ def collect_scan(args: argparse.Namespace) -> np.ndarray:
                     print_status(event)
                     complete = event.state == 2
                 elif isinstance(event, ScanSlice):
+                    corr_pitch, corr_roll = get_imu_correction(event)
+                    tilt_series = np.linspace(
+                        event.tilt_start_deg,
+                        event.tilt_end_deg,
+                        num=len(event.angles_deg),
+                        dtype=np.float64,
+                    )
                     pts = transform_slice_to_3d(
                         event.angles_deg,
                         event.dists_mm,
-                        event.tilt_deg,
-                        event.imu_pitch_deg,
-                        event.imu_roll_deg,
+                        tilt_series,
+                        tilt_axis_offset_m=args.tilt_axis_offset_mm / 1000.0,
+                        imu_pitch_deg=corr_pitch,
+                        imu_roll_deg=corr_roll,
                         min_dist_mm=args.min_dist,
                         max_dist_mm=args.max_dist,
                         min_quality=args.min_quality,
@@ -539,7 +621,8 @@ def collect_scan(args: argparse.Namespace) -> np.ndarray:
                     if len(pts):
                         points = np.vstack([points, pts])
                     print(
-                        f"[slice] tilt={event.tilt_deg:.2f} deg raw={len(event.dists_mm)} "
+                        f"[slice] tilt={event.tilt_start_deg:.2f}->{event.tilt_end_deg:.2f} deg "
+                        f"raw={len(event.dists_mm)} "
                         f"accepted={len(pts)} total={len(points)}",
                         flush=True,
                     )
@@ -565,12 +648,20 @@ def collect_scan(args: argparse.Namespace) -> np.ndarray:
                         continue
 
                     if isinstance(event, ScanSlice):
+                        corr_pitch, corr_roll = get_imu_correction(event)
+                        tilt_series = np.linspace(
+                            event.tilt_start_deg,
+                            event.tilt_end_deg,
+                            num=len(event.angles_deg),
+                            dtype=np.float64,
+                        )
                         pts = transform_slice_to_3d(
                             event.angles_deg,
                             event.dists_mm,
-                            event.tilt_deg,
-                            event.imu_pitch_deg,
-                            event.imu_roll_deg,
+                            tilt_series,
+                            tilt_axis_offset_m=args.tilt_axis_offset_mm / 1000.0,
+                            imu_pitch_deg=corr_pitch,
+                            imu_roll_deg=corr_roll,
                             min_dist_mm=args.min_dist,
                             max_dist_mm=args.max_dist,
                             min_quality=args.min_quality,
@@ -579,7 +670,8 @@ def collect_scan(args: argparse.Namespace) -> np.ndarray:
                         if len(pts):
                             points = np.vstack([points, pts])
                         print(
-                            f"[slice] tilt={event.tilt_deg:.2f} deg raw={len(event.dists_mm)} "
+                            f"[slice] tilt={event.tilt_start_deg:.2f}->{event.tilt_end_deg:.2f} deg "
+                            f"raw={len(event.dists_mm)} "
                             f"accepted={len(pts)} total={len(points)}",
                             flush=True,
                         )
@@ -637,7 +729,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="LiderModule 3D LiDAR scanner host")
     parser.add_argument("--port", default="/dev/ttyACM0", help="serial port")
     parser.add_argument("--baud", type=int, default=921600, help="USB CDC baud rate")
-    parser.add_argument("--pattern-csv", default="../計測パターン.csv", help="scan pattern CSV file")
+    parser.add_argument("--pattern-csv", default=DEFAULT_PATTERN_CSV, help="scan pattern CSV file")
     parser.add_argument("--mode", choices=["下方", "上方"], default="下方", help="detection mode")
     parser.add_argument("--tilt-min", type=float, default=-45.0, help="scan start tilt [deg] (linear mode)")
     parser.add_argument("--tilt-max", type=float, default=45.0, help="scan end tilt [deg] (linear mode)")
@@ -683,6 +775,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--min-dist", type=int, default=20, help="minimum accepted distance [mm]")
     parser.add_argument("--max-dist", type=int, default=12000, help="maximum accepted distance [mm]")
+    parser.add_argument(
+        "--tilt-axis-offset-mm",
+        type=float,
+        default=DEFAULT_TILT_AXIS_OFFSET_MM,
+        help="sensor center offset above tilt rotation axis [mm]",
+    )
+    parser.add_argument(
+        "--imu-ref-tilt-threshold-deg",
+        type=float,
+        default=1.0,
+        help="lock IMU correction when |tilt| is within this threshold around 0 deg",
+    )
     parser.add_argument("--min-quality", type=int, default=0, help="minimum accepted LiDAR quality")
     parser.add_argument("--timeout", type=float, default=10.0, help="receive timeout [s]")
     parser.add_argument("--verbose", action="store_true", help="print IMU packets")

@@ -39,9 +39,23 @@ class ProtocolTests(unittest.TestCase):
         decoded = host.decode_payload(host.MSG_SCAN_SLICE, payload)
 
         self.assertAlmostEqual(decoded.tilt_deg, 10.0)
+        self.assertAlmostEqual(decoded.tilt_start_deg, 10.0)
+        self.assertAlmostEqual(decoded.tilt_end_deg, 10.0)
         np.testing.assert_allclose(decoded.angles_deg, np.array([90.0, 180.0]))
         np.testing.assert_array_equal(decoded.dists_mm, np.array([1000, 2000], dtype=np.uint16))
         np.testing.assert_array_equal(decoded.qualities, np.array([20, 30], dtype=np.uint8))
+
+    def test_scan_slice_decode_extended_tilt_sync(self):
+        payload = struct.pack("<fffffH", 12.0, 8.0, 16.0, 1.0, -2.0, 2)
+        payload += struct.pack("<HHB", 9000, 1000, 20)
+        payload += struct.pack("<HHB", 18000, 2000, 30)
+
+        decoded = host.decode_payload(host.MSG_SCAN_SLICE, payload)
+
+        self.assertAlmostEqual(decoded.tilt_deg, 12.0)
+        self.assertAlmostEqual(decoded.tilt_start_deg, 8.0)
+        self.assertAlmostEqual(decoded.tilt_end_deg, 16.0)
+        np.testing.assert_allclose(decoded.angles_deg, np.array([90.0, 180.0]))
 
     def test_transform_filters_and_projects(self):
         angles = np.array([0.0, 90.0, 180.0])
@@ -68,6 +82,27 @@ class ProtocolTests(unittest.TestCase):
         )
 
         np.testing.assert_allclose(pts[0], np.array([0.0, 0.0, -1.0]), atol=1e-9)
+
+    def test_tilt_projection_with_tilt_series(self):
+        pts = host.transform_slice_to_3d(
+            np.array([0.0, 0.0]),
+            np.array([1000, 1000], dtype=np.uint16),
+            tilt_deg=np.array([0.0, 90.0]),
+            max_dist_mm=2000,
+        )
+
+        np.testing.assert_allclose(pts[0], np.array([1.0, 0.0, 0.0]), atol=1e-9)
+        np.testing.assert_allclose(pts[1], np.array([0.0, 0.0, -1.0]), atol=1e-9)
+
+    def test_tilt_axis_offset_applied(self):
+        pts = host.transform_slice_to_3d(
+            np.array([0.0], dtype=np.float64),
+            np.array([1000], dtype=np.uint16),
+            tilt_deg=0.0,
+            tilt_axis_offset_m=0.023,
+            max_dist_mm=2000,
+        )
+        np.testing.assert_allclose(pts[0], np.array([1.0, 0.0, 0.023]), atol=1e-9)
 
 
 if __name__ == "__main__":

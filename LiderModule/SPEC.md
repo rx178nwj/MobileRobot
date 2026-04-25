@@ -8,6 +8,14 @@
 
 2D LiDAR（YDLIDAR T-mini Pro）をサーボモーター（FEETECH STS3215）で上下に傾斜（チルト）させることで、低コストに3Dポイントクラウドを取得するシステムを構築する。
 
+### 1.1.1 責務分離ポリシー
+
+- **LiderModule (ESP32-S3)**: センシング品質に専念する。具体的には LiDAR点群、チルト角、IMU姿勢、取得タイミング整合を安定して生成・送信する。
+- **Raspberry Pi (Host)**: 意味解釈・判断を担当する。具体的には段差/穴の検出、危険度判定、走行可否判断、制御系への通知を実装する。
+
+注記:
+- 本仕様のUSB CDCプロトコルは「生に近い観測情報の送信」を優先し、段差/穴の最終判定ロジックはプロトコル外（Host側アルゴリズム）とする。
+
 ### 1.2 システム構成
 
 ```
@@ -23,7 +31,7 @@
 ┌────────────────────┴────────────────────────────────────┐
 │  Seeed バスサーボドライバーボード for XIAO                  │
 │  ┌──────────────────────────────┐                        │
-│  │  XIAO ESP32-C3 (差し込み装着)  │                        │
+│  │  XIAO ESP32-S3 (差し込み装着)  │                        │
 │  │  - LiDARデータ受信・解析       │                        │
 │  │  - IMUデータ取得・フィルタ      │                        │
 │  │  - サーボ制御                  │                        │
@@ -42,8 +50,8 @@
 ### 1.3 動作概要
 
 1. RPi から3Dスキャン開始コマンドを送信
-2. ESP32-C3 がサーボを -45° → +45° まで段階的にチルト
-3. 各チルト角度で LiDAR の360°スキャン1回転分を取得
+2. ESP32-S3 がサーボを -45° → +45° まで連続スイープ（停止なし）
+3. スイープ中に LiDAR の360°スキャン1回転分ごとにスライス化して取得
 4. チルト角度 + IMU姿勢 + LiDARスキャンデータを1スライスとしてRPiに送信
 5. RPi側で座標変換し、3Dポイントクラウドを構築
 6. スキャン完了後、PLY/CSV保存 or リアルタイム表示
@@ -56,7 +64,7 @@
 
 | コンポーネント | 型番 | 数量 | 主な仕様 |
 |---|---|---|---|
-| マイコン | Seeed XIAO ESP32-C3 | 1 | RISC-V 160MHz, 400KB RAM, USB CDC, WiFi/BLE |
+| マイコン | Seeed XIAO ESP32-S3 | 1 | Xtensa LX7 dual-core 240MHz, 512KB SRAM + 8MB PSRAM, USB CDC, WiFi/BLE |
 | サーボドライバー | Seeed バスサーボドライバーボード for XIAO | 1 | GH1.25コネクタ、UART半二重変換、DC IN 5.5×2.1mm |
 | サーボモーター | FEETECH STS3215 (7.4V版) | 1 | 7.4V, 19.5kg·cm stall, 12bit磁気エンコーダ, 4096ステップ/360°, TTLシリアルバス 1Mbps |
 | LiDAR | YDLIDAR T-mini Pro | 1 | 360° ToF, 4000pts/s, 0.02-12m, UART 230400bps, 3.3Vレベル, GH1.25-4P |
@@ -68,32 +76,32 @@
 | 電源 | 電圧 | 電流容量 | 供給先 | 接続 |
 |---|---|---|---|---|
 | 7.4V (2S LiPo or ACアダプタ) | 7.4V | 3A以上 | STS3215 サーボ | ドライバーボード DC IN (5.5×2.1mm) |
-| 5V (DC-DCコンバータ or USB) | 5V | 1.5A以上 | LiDAR T-mini Pro, XIAO ESP32-C3 | LiDAR VCC, XIAO USB-C |
+| 5V (DC-DCコンバータ or USB) | 5V | 1.5A以上 | LiDAR T-mini Pro, XIAO ESP32-S3 | LiDAR VCC, XIAO USB-C |
 | 3.3V (XIAO内蔵レギュレータ) | 3.3V | — | MPU6050 | XIAO 3.3Vピン |
 
 > **注意**: 7.4V→5V DC-DC (例: MP1584) を使えば1電源に統一可能。GNDは全デバイスで共通化必須。
 
-### 2.3 ピンアサイン（XIAO ESP32-C3）
+### 2.3 ピンアサイン（XIAO ESP32-S3）
 
 | XIAOピン | GPIO | 機能 | 接続先 | プロトコル | 備考 |
 |---|---|---|---|---|---|
-| D6 | GPIO20 | UART0 TX | サーボドライバーボード内部配線 | TTL 1Mbps | ボードに差し込むだけ |
-| D7 | GPIO21 | UART0 RX | サーボドライバーボード内部配線 | TTL 1Mbps | ボードに差し込むだけ |
-| D2 | GPIO4 | UART1 RX | T-mini Pro Pin2 (TX) | 230400bps | 外部配線必要 |
-| D3 | GPIO5 | UART1 TX | T-mini Pro Pin4 (RX) | 230400bps | 外部配線必要 |
-| D4 | GPIO6 | I2C SDA | MPU6050 SDA | 400kHz | 外部配線必要 |
-| D5 | GPIO7 | I2C SCL | MPU6050 SCL | 400kHz | 外部配線必要 |
-| USB-C | GPIO18/19 | USB CDC | Raspberry Pi | Binary protocol | XIAOのUSBポート |
-| D0, D1, D8, D9, D10 | — | 未使用 | — | — | 拡張用予備 |
+| D6 | GPIO43 | UART0 TX | サーボドライバーボード内部配線 | TTL 1Mbps | ボードに差し込むだけ |
+| D7 | GPIO44 | UART0 RX | サーボドライバーボード内部配線 | TTL 1Mbps | ボードに差し込むだけ |
+| D2 | GPIO3 | UART1 RX | T-mini Pro Pin2 (TX) | 230400bps | 外部配線必要 |
+| D3 | GPIO4 | UART1 TX | T-mini Pro Pin4 (RX) | 230400bps | 外部配線必要 |
+| D4 | GPIO5 | I2C SDA | MPU6050 SDA | 400kHz | 外部配線必要 |
+| D5 | GPIO6 | I2C SCL | MPU6050 SCL | 400kHz | 外部配線必要 |
+| USB-C | GPIO19/20 (内蔵USB D-/D+) | USB CDC | Raspberry Pi | Binary protocol | XIAOのUSBポート |
+| D0, D1, D8, D9, D10 | GPIO1, GPIO2, GPIO7, GPIO8, GPIO9 | 未使用 | — | — | 拡張用予備 |
 
 ### 2.4 LiDAR接続 (GH1.25-4P)
 
 | T-mini Pro Pin | 信号 | 接続先 |
 |---|---|---|
 | Pin1: VCC | 5V | 外部5V電源 (+) |
-| Pin2: TX | UART出力 (3.3V) | XIAO D2 (GPIO4, RX1) |
+| Pin2: TX | UART出力 (3.3V) | XIAO D2 (GPIO3, RX1) |
 | Pin3: GND | 0V | 共通GND |
-| Pin4: RX | UART入力 (3.3V) | XIAO D3 (GPIO5, TX1) |
+| Pin4: RX | UART入力 (3.3V) | XIAO D3 (GPIO4, TX1) |
 
 > レベル変換不要。T-mini ProのUART信号は3.3Vレベル。
 
@@ -103,8 +111,8 @@
 |---|---|
 | VCC | XIAO 3.3V |
 | GND | 共通GND |
-| SDA | XIAO D4 (GPIO6) |
-| SCL | XIAO D5 (GPIO7) |
+| SDA | XIAO D4 (GPIO5) |
+| SCL | XIAO D5 (GPIO6) |
 | AD0 | GND (I2Cアドレス = 0x68) |
 
 ### 2.6 サーボドライバーボード設定
@@ -129,7 +137,7 @@
 
 ### 3.1 フレーム形式
 
-ESP32-C3 ↔ Raspberry Pi 間のUSB CDCバイナリプロトコル。
+ESP32-S3 ↔ Raspberry Pi 間のUSB CDCバイナリプロトコル。
 
 ```
 [SYNC1][SYNC2][TYPE][LEN_L][LEN_H][PAYLOAD...][CHECKSUM]
@@ -168,15 +176,23 @@ ESP32-C3 ↔ Raspberry Pi 間のUSB CDCバイナリプロトコル。
 
 ```
 Offset  Size  Field
-0       4     tilt_deg      (float32) サーボのチルト角度 [度]
-4       4     imu_pitch     (float32) IMU pitch [度]
-8       4     imu_roll      (float32) IMU roll [度]
-12      2     count         (uint16)  ポイント数 N
-14      5×N   points        各ポイント:
+0       4     tilt_deg      (float32) サーボ目標チルト角度 [度]
+4       4     tilt_start    (float32) スライス取得開始時の実チルト [度]
+8       4     tilt_end      (float32) スライス取得終了時の実チルト [度]
+12      4     imu_pitch     (float32) IMU pitch [度]
+16      4     imu_roll      (float32) IMU roll [度]
+20      2     count         (uint16)  ポイント数 N
+22      5×N   points        各ポイント:
                               [0-1] angle_x100 (uint16) LiDAR角度×100
                               [2-3] dist_mm    (uint16) 距離 [mm]
                               [4]   quality    (uint8)  信号品質
 ```
+
+備考:
+
+- 取得中サーボを動かしたまま計測し、`tilt_start -> tilt_end` を点数分補間して螺旋状に再構成する。
+- 旧フォーマット (`tilt, imu_pitch, imu_roll, count`, 14 bytes header) を受信した場合は
+  `tilt_start = tilt_end = tilt` として扱う。
 
 ### 3.4 3D scan status (0x05) 詳細
 
@@ -195,12 +211,12 @@ Offset  Size  Field
 
 ---
 
-## 4. ESP32-C3 ファームウェア仕様
+## 4. ESP32-S3 ファームウェア仕様
 
 ### 4.1 開発環境
 
 - **IDE**: Arduino IDE 2.x
-- **ボード**: Seeed Studio XIAO ESP32-C3
+- **ボード**: Seeed Studio XIAO ESP32-S3
 - **必須ライブラリ**:
   - `SCServo` — Feetech STS/SCS サーボ制御 (https://github.com/workloads/scservo)
   - `MPU6050` — i2cdevlibベース DMPサポート版 (MotionApps20)
@@ -216,7 +232,7 @@ Offset  Size  Field
 Serial    // USBSerial (CDC)
 
 // UART0 → STS3215 サーボ (ドライバーボード内部配線)
-Serial0   // HardwareSerial(0), pins D6/D7, 1Mbps
+Serial0   // HardwareSerial(0), pins D6(GPIO43)/D7(GPIO44), 1Mbps
 
 // UART1 → YDLIDAR T-mini Pro (外部配線)
 HardwareSerial LidarSerial(1);  // pins D2(RX)/D3(TX), 230400bps
@@ -226,10 +242,10 @@ HardwareSerial LidarSerial(1);  // pins D2(RX)/D3(TX), 230400bps
 
 ```c
 // ピン
-#define LIDAR_RXD     4    // D2 = GPIO4
-#define LIDAR_TXD     5    // D3 = GPIO5
-#define IMU_SDA       6    // D4 = GPIO6
-#define IMU_SCL       7    // D5 = GPIO7
+#define LIDAR_RXD     3    // D2 = GPIO3
+#define LIDAR_TXD     4    // D3 = GPIO4
+#define IMU_SDA       5    // D4 = GPIO5
+#define IMU_SCL       6    // D5 = GPIO6
 
 // デバイス
 #define MPU6050_ADDR      0x68
@@ -356,7 +372,7 @@ pos = constrain(pos, 0, 4095);
 5. 3Dスキャン状態機械更新
 ```
 
-> ESP32-C3はシングルコア (RISC-V) のため、すべてノンブロッキング処理が必須。
+> ESP32-S3 はデュアルコアだが、Arduinoの `loop()` は実質単一タスクとして扱うため、受信処理はノンブロッキング前提で設計する。
 > LiDAR受信処理はループ占有防止のため1回あたり処理バジェット（上限バイト数）を設ける。
 
 ---
@@ -523,16 +539,16 @@ x,y,z
 
 ### 6.2 USB CDC帯域
 
-- 1スライス: 14 (header) + 667×5 (points) = ~3.35 KB
+- 1スライス: 22 (拡張header) + 667×5 (points) = ~3.36 KB
 - 46スライス合計: ~154 KB
 - USB CDC実効帯域 (12Mbps): 十分余裕あり
 
-### 6.3 メモリ使用量 (ESP32-C3)
+### 6.3 メモリ使用量 (ESP32-S3)
 
 - LiDARスキャンバッファ: 700 × 5 bytes = 3.5 KB
 - LiDARパケットバッファ: 256 bytes
 - コマンドバッファ: 64 bytes
-- ESP32-C3 RAM: 400 KB → 十分余裕あり
+- ESP32-S3 SRAM: 512 KB (+ PSRAM 8 MB) → 十分余裕あり
 
 ---
 
@@ -542,14 +558,14 @@ x,y,z
 project/
 ├── firmware/
 │   └── lidar_tilt_3d/
-│       └── lidar_tilt_3d.ino          # ESP32-C3 ファームウェア (Arduino)
+│       └── lidar_tilt_3d.ino          # ESP32-S3 ファームウェア (Arduino)
 ├── host/
 │   ├── rpi_tilt_3d.py                 # RPi 3Dスキャン + 可視化 (メイン)
 │   ├── requirements.txt               # Python依存パッケージ
 │   └── README.md                      # RPi側セットアップ手順
 ├── docs/
-│   ├── SPEC.md                        # この仕様書
 │   └── wiring.md                      # 配線図・写真
+├── SPEC.md                            # この仕様書
 └── README.md                          # プロジェクト概要
 ```
 
@@ -566,10 +582,10 @@ matplotlib>=3.5
 
 ## 8. 実装上の注意事項
 
-### 8.1 ESP32-C3 固有の制約
+### 8.1 ESP32-S3 固有の制約
 
-- **シングルコア RISC-V**: すべてノンブロッキング処理。delay()はsetup()以外で使用禁止。
-- **UART は2系統のみ**: UART0=サーボ、UART1=LiDAR で全て使い切り。デバッグ出力はUSB CDC経由。
+- **デュアルコア Xtensa LX7**: 受信欠落防止のため、メインループ処理はノンブロッキングを維持する。
+- **UART は3系統**: 本設計では UART0=サーボ、UART1=LiDAR を使用。デバッグ出力はUSB CDC経由。
 - **Arduino IDE設定**: `USB CDC On Boot` を `Enabled` にしないと `Serial` がUSB CDCにマッピングされない。
 - **Serial0 と Serial の違い**: `USB CDC On Boot = Enabled` の場合、`Serial` = USB CDC、`Serial0` = UART0 (HardwareSerial)。
 
@@ -589,7 +605,7 @@ matplotlib>=3.5
 
 ### 8.4 RPi側の注意
 
-- `Serial` 接続時に DTR/RTS を `False` にしないと ESP32-C3 がリセットされる。
+- `Serial` 接続時に DTR/RTS を `False` にしないと ESP32-S3 がリセットされる。
 - USB CDC のバッファオーバーフロー対策: `ser.read(512)` でチャンクリード。
 - Open3D の `Visualizer` はメインスレッドで実行する必要がある。データ受信はバックグラウンドスレッド。
 - ファームのUSBテキストデバッグモード有効時はバイナリプロトコルを抑止するため、通常の `rpi_tilt_3d.py` 連携は無効になる。運用時はテキストデバッグを無効化する。
@@ -631,6 +647,6 @@ matplotlib>=3.5
 
 - **ROS2対応**: `sensor_msgs/PointCloud2` パブリッシャーノードの追加
 - **SLAM統合**: RPi上で `rtabmap` 等を使ったリアルタイムマッピング
-- **WiFi送信**: ESP32-C3のWiFiを使い、USB接続不要でデータ送信
+- **WiFi送信**: ESP32-S3のWiFiを使い、USB接続不要でデータ送信
 - **可変ステップ**: チルト端部 (±40°〜±45°) のステップを細かくして点密度を均一化
 - **連続スキャン**: 往復チルト（-45→+45→-45→...）で継続的にポイントクラウドを更新
