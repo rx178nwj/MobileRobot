@@ -36,7 +36,7 @@ RUN git clone https://github.com/YDLIDAR/YDLidar-SDK.git /tmp/YDLidar-SDK && \
     rm -rf /tmp/YDLidar-SDK
 
 # Install Python dependencies
-RUN pip3 install --break-system-packages smbus2 websockets openai
+RUN pip3 install --break-system-packages smbus2 websockets openai pyserial numpy
 
 # Setup workspace
 WORKDIR /ros2_ws

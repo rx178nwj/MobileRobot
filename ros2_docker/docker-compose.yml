@@ -10,6 +10,7 @@ services:
       - /dev/video0:/dev/video0
       - /dev/ttyUSB0:/dev/ttyUSB0
       - /dev/ttyUSB1:/dev/ttyUSB1
+      - /dev/ttyACM0:/dev/ttyACM0
     volumes:
       - ../mobile_robot_edge:/ros2_ws/src/mobile_robot_edge
       - ../mobile_robot_server:/ros2_ws/src/mobile_robot_server

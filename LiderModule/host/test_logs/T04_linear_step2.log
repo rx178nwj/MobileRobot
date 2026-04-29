@@ -1,0 +1,191 @@
+[T04] linear-step2
+[scan] started: 0/46
+[slice] tilt=-42.19->-42.19 deg raw=51 accepted=40 total=40
+[scan] running: 1/46
+[slice] tilt=-42.45->-41.57 deg raw=499 accepted=396 total=436
+[scan] running: 2/46
+[slice] tilt=-41.04->-36.83 deg raw=617 accepted=505 total=941
+[scan] running: 3/46
+[slice] tilt=-36.56->-34.89 deg raw=607 accepted=492 total=1433
+[scan] running: 4/46
+[slice] tilt=-34.72->-33.13 deg raw=609 accepted=496 total=1929
+[scan] running: 5/46
+[slice] tilt=-32.96->-31.29 deg raw=619 accepted=517 total=2446
+[scan] running: 6/46
+[slice] tilt=-31.11->-29.53 deg raw=625 accepted=554 total=3000
+[scan] running: 7/46
+[slice] tilt=-29.27->-27.60 deg raw=631 accepted=561 total=3561
+[scan] running: 8/46
+[slice] tilt=-27.42->-25.75 deg raw=637 accepted=583 total=4144
+[scan] running: 9/46
+[slice] tilt=-25.49->-23.82 deg raw=645 accepted=577 total=4721
+[scan] running: 10/46
+[slice] tilt=-23.64->-21.88 deg raw=647 accepted=579 total=5300
+[scan] running: 11/46
+[slice] tilt=-21.71->-19.95 deg raw=655 accepted=576 total=5876
+[scan] running: 12/46
+[slice] tilt=-19.78->-18.02 deg raw=657 accepted=573 total=6449
+[scan] running: 13/46
+[slice] tilt=-17.84->-16.08 deg raw=659 accepted=558 total=7007
+[scan] running: 14/46
+[slice] tilt=-15.91->-14.15 deg raw=661 accepted=571 total=7578
+[scan] running: 15/46
+[slice] tilt=-13.97->-12.22 deg raw=663 accepted=555 total=8133
+[scan] running: 16/46
+[slice] tilt=-11.95->-10.20 deg raw=665 accepted=572 total=8705
+[scan] running: 17/46
+[slice] tilt=-10.11->-8.26 deg raw=667 accepted=579 total=9284
+[scan] running: 18/46
+[slice] tilt=-8.09->-6.33 deg raw=667 accepted=576 total=9860
+[scan] running: 19/46
+[slice] tilt=-6.06->-4.31 deg raw=667 accepted=560 total=10420
+[scan] running: 20/46
+[slice] tilt=-4.13->-2.37 deg raw=665 accepted=539 total=10959
+[scan] running: 21/46
+[slice] tilt=-2.20->-0.35 deg raw=667 accepted=573 total=11532
+[scan] running: 22/46
+[imu] reference locked at tilt~0: pitch=1.88 roll=-1.15
+[slice] tilt=-0.26->1.49 deg raw=665 accepted=559 total=12091
+[scan] running: 23/46
+[slice] tilt=1.67->3.43 deg raw=665 accepted=546 total=12637
+[scan] running: 24/46
+[slice] tilt=3.60->5.45 deg raw=663 accepted=544 total=13181
+[scan] running: 25/46
+[slice] tilt=5.54->7.38 deg raw=665 accepted=562 total=13743
+[scan] running: 26/46
+[slice] tilt=7.56->9.32 deg raw=663 accepted=567 total=14310
+[scan] running: 27/46
+[slice] tilt=9.58->11.25 deg raw=667 accepted=579 total=14889
+[scan] running: 28/46
+[slice] tilt=11.51->13.27 deg raw=663 accepted=571 total=15460
+[scan] running: 29/46
+[slice] tilt=13.45->15.21 deg raw=665 accepted=582 total=16042
+[scan] running: 30/46
+[slice] tilt=15.38->17.14 deg raw=665 accepted=536 total=16578
+[scan] running: 31/46
+[slice] tilt=17.31->19.16 deg raw=667 accepted=565 total=17143
+[scan] running: 32/46
+[slice] tilt=19.34->21.09 deg raw=667 accepted=521 total=17664
+[scan] running: 33/46
+[slice] tilt=21.27->23.03 deg raw=665 accepted=513 total=18177
+[scan] running: 34/46
+[slice] tilt=23.29->24.96 deg raw=663 accepted=505 total=18682
+[scan] running: 35/46
+[slice] tilt=25.22->26.98 deg raw=665 accepted=522 total=19204
+[scan] running: 36/46
+[slice] tilt=27.16->28.92 deg raw=663 accepted=517 total=19721
+[scan] running: 37/46
+[slice] tilt=29.09->30.85 deg raw=665 accepted=522 total=20243
+[scan] running: 38/46
+[slice] tilt=31.03->32.78 deg raw=665 accepted=534 total=20777
+[scan] running: 39/46
+[slice] tilt=33.05->34.80 deg raw=667 accepted=521 total=21298
+[scan] running: 40/46
+[slice] tilt=34.98->36.83 deg raw=667 accepted=513 total=21811
+[scan] running: 41/46
+[slice] tilt=37.00->38.76 deg raw=667 accepted=517 total=22328
+[scan] running: 42/46
+[slice] tilt=38.94->40.78 deg raw=667 accepted=524 total=22852
+[scan] running: 43/46
+[slice] tilt=40.87->42.71 deg raw=669 accepted=560 total=23412
+[scan] running: 44/46
+[slice] tilt=42.89->44.65 deg raw=669 accepted=576 total=23988
+[scan] running: 45/46
+[slice] tilt=44.74->43.33 deg raw=667 accepted=589 total=24577
+[scan] running: 46/46
+[slice] tilt=43.15->41.40 deg raw=669 accepted=558 total=25135
+[scan] running: 46/46
+[slice] tilt=41.13->39.38 deg raw=669 accepted=540 total=25675
+[scan] running: 46/46
+[slice] tilt=39.20->37.35 deg raw=669 accepted=530 total=26205
+[scan] running: 46/46
+[slice] tilt=37.27->35.42 deg raw=667 accepted=503 total=26708
+[scan] running: 46/46
+[slice] tilt=35.24->33.49 deg raw=667 accepted=526 total=27234
+[scan] running: 46/46
+[slice] tilt=33.22->31.46 deg raw=669 accepted=527 total=27761
+[scan] running: 46/46
+[slice] tilt=31.29->29.53 deg raw=667 accepted=541 total=28302
+[scan] running: 46/46
+[slice] tilt=29.36->27.51 deg raw=669 accepted=536 total=28838
+[scan] running: 46/46
+[slice] tilt=27.33->25.49 deg raw=669 accepted=526 total=29364
+[scan] running: 46/46
+[slice] tilt=25.40->23.64 deg raw=667 accepted=512 total=29876
+[scan] running: 46/46
+[slice] tilt=23.38->21.62 deg raw=669 accepted=515 total=30391
+[scan] running: 46/46
+[slice] tilt=21.45->19.69 deg raw=667 accepted=529 total=30920
+[scan] running: 46/46
+[slice] tilt=19.51->17.75 deg raw=667 accepted=546 total=31466
+[scan] running: 46/46
+[slice] tilt=17.49->15.73 deg raw=669 accepted=549 total=32015
+[scan] running: 46/46
+[slice] tilt=15.56->13.71 deg raw=669 accepted=558 total=32573
+[scan] running: 46/46
+[slice] tilt=13.54->11.78 deg raw=667 accepted=574 total=33147
+[scan] running: 46/46
+[slice] tilt=11.60->9.84 deg raw=669 accepted=580 total=33727
+[scan] running: 46/46
+[slice] tilt=9.58->7.82 deg raw=667 accepted=580 total=34307
+[scan] running: 46/46
+[slice] tilt=7.65->5.80 deg raw=667 accepted=570 total=34877
+[scan] running: 46/46
+[slice] tilt=5.62->3.87 deg raw=667 accepted=575 total=35452
+[scan] running: 46/46
+[slice] tilt=3.69->1.93 deg raw=667 accepted=559 total=36011
+[scan] running: 46/46
+[slice] tilt=1.76->-0.00 deg raw=667 accepted=551 total=36562
+[scan] running: 46/46
+[slice] tilt=-0.09->-1.93 deg raw=669 accepted=558 total=37120
+[scan] running: 46/46
+[slice] tilt=-2.11->-3.87 deg raw=669 accepted=551 total=37671
+[scan] running: 46/46
+[slice] tilt=-4.13->-5.80 deg raw=667 accepted=534 total=38205
+[scan] running: 46/46
+[slice] tilt=-6.06->-7.82 deg raw=669 accepted=565 total=38770
+[scan] running: 46/46
+[slice] tilt=-8.00->-9.84 deg raw=667 accepted=559 total=39329
+[scan] running: 46/46
+[slice] tilt=-10.02->-11.78 deg raw=665 accepted=572 total=39901
+[scan] running: 46/46
+[slice] tilt=-11.95->-13.71 deg raw=667 accepted=561 total=40462
+[scan] running: 46/46
+[slice] tilt=-13.97->-15.73 deg raw=667 accepted=568 total=41030
+[scan] running: 46/46
+[slice] tilt=-15.91->-17.67 deg raw=667 accepted=568 total=41598
+[scan] running: 46/46
+[slice] tilt=-17.93->-19.69 deg raw=669 accepted=583 total=42181
+[scan] running: 46/46
+[slice] tilt=-19.86->-21.62 deg raw=667 accepted=590 total=42771
+[scan] running: 46/46
+[slice] tilt=-21.80->-23.64 deg raw=667 accepted=596 total=43367
+[scan] running: 46/46
+[slice] tilt=-23.73->-25.49 deg raw=665 accepted=613 total=43980
+[scan] running: 46/46
+[slice] tilt=-25.75->-27.51 deg raw=669 accepted=601 total=44581
+[scan] running: 46/46
+[slice] tilt=-27.69->-29.44 deg raw=667 accepted=596 total=45177
+[scan] running: 46/46
+[slice] tilt=-29.71->-31.46 deg raw=667 accepted=582 total=45759
+[scan] running: 46/46
+[slice] tilt=-31.64->-33.40 deg raw=667 accepted=561 total=46320
+[scan] running: 46/46
+[slice] tilt=-33.57->-35.42 deg raw=667 accepted=557 total=46877
+[scan] running: 46/46
+[slice] tilt=-35.60->-37.35 deg raw=667 accepted=562 total=47439
+[scan] running: 46/46
+[slice] tilt=-37.62->-39.38 deg raw=667 accepted=547 total=47986
+[scan] running: 46/46
+[slice] tilt=-39.55->-41.31 deg raw=669 accepted=532 total=48518
+[scan] running: 46/46
+[slice] tilt=-41.48->-43.33 deg raw=667 accepted=530 total=49048
+[scan] running: 46/46
+[slice] tilt=-43.42->-44.82 deg raw=667 accepted=522 total=49570
+[scan] running: 46/46
+[slice] tilt=-44.82->-44.82 deg raw=667 accepted=521 total=50091
+[scan] running: 46/46
+[slice] tilt=-44.82->-44.82 deg raw=667 accepted=530 total=50621
+[scan] running: 46/46
+[scan] complete: 46/46
+[save] wrote 50621 points to host/test_logs/t04_step2.ply

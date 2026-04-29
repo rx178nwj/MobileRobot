@@ -12,7 +12,7 @@ slam_toolbox:
 
     # ---- マップ解像度 ----
     resolution:         0.05    # 5cm (Nav2と一致)
-    max_laser_range:    8.0     # YDLIDAR T-mini Plus 実用レンジ
+    max_laser_range:    12.0    # YDLIDAR T-mini Pro 最大レンジ (LiderModule)
     minimum_time_interval: 0.5  # 最短マップ更新間隔(秒)
 
     # ---- TF 発行 ----

@@ -1,0 +1,15 @@
+[T06] downward-monitor
+[monitor] started port=/dev/ttyACM1 range=-45.0..0.0 step=2.0
+[hazard] status=UNKNOWN   reason=insufficient points points=0 slices=0 status=0/0
+[hazard] status=UNKNOWN   reason=insufficient points points=345 slices=3 status=2/24
+[hazard] status=HOLE      reason=hole-like bins=13 points=3896 slices=10 status=9/24
+[hazard] status=HOLE      reason=hole-like bins=6 points=7286 slices=16 status=16/24
+[hazard] status=HOLE      reason=hole-like bins=6 points=10654 slices=22 status=22/24
+[imu] reference locked at tilt~0: pitch=1.90 roll=0.65
+[hazard] status=HOLE      reason=hole-like bins=6 points=14604 slices=29 status=24/24
+[hazard] status=HOLE      reason=hole-like bins=4 points=18001 slices=35 status=24/24
+[hazard] status=HOLE      reason=hole-like bins=4 points=21491 slices=41 status=24/24
+[hazard] status=HOLE      reason=hole-like bins=3 points=25237 slices=48 status=24/24
+[hazard] status=HOLE      reason=hole-like bins=3 points=26461 slices=51 status=1/24
+[result] status=HOLE reason=hole-like bins=3 points=27980 slices=54 accepted_total=27980
+[save] summary image: host/test_logs/t06_downward.png

@@ -1,0 +1,4 @@
+[T07] visualize-step2
+[info] loaded: host/test_logs/t04_step2.ply
+[info] summary: points=50621  x=[-7.094,8.379]  y=[-2.458,9.791]  z=[-6.613,3.011]
+[save] matplotlib figure: host/test_logs/t07_step2_summary.png

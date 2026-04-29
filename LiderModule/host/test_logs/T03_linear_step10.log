@@ -1,0 +1,45 @@
+[T03] linear-step10
+[scan] started: 0/10
+[slice] tilt=-35.68->-35.68 deg raw=51 accepted=39 total=39
+[scan] running: 1/10
+[slice] tilt=-35.77->-33.22 deg raw=495 accepted=399 total=438
+[scan] running: 2/10
+[slice] tilt=-32.34->-19.86 deg raw=613 accepted=548 total=986
+[scan] running: 3/10
+[slice] tilt=-18.02->-4.04 deg raw=613 accepted=521 total=1507
+[scan] running: 4/10
+[slice] tilt=-2.72->8.26 deg raw=611 accepted=497 total=2004
+[scan] running: 5/10
+[slice] tilt=9.32->18.46 deg raw=615 accepted=533 total=2537
+[scan] running: 6/10
+[slice] tilt=19.51->28.04 deg raw=623 accepted=467 total=3004
+[scan] running: 7/10
+[slice] tilt=29.00->37.53 deg raw=629 accepted=504 total=3508
+[scan] running: 8/10
+[slice] tilt=38.50->44.74 deg raw=641 accepted=539 total=4047
+[scan] running: 9/10
+[slice] tilt=44.82->40.52 deg raw=645 accepted=562 total=4609
+[scan] running: 10/10
+[slice] tilt=39.46->27.07 deg raw=647 accepted=514 total=5123
+[scan] running: 10/10
+[slice] tilt=25.84->15.38 deg raw=651 accepted=496 total=5619
+[scan] running: 10/10
+[slice] tilt=14.24->4.92 deg raw=657 accepted=571 total=6190
+[scan] running: 10/10
+[imu] reference locked at tilt~0: pitch=0.48 roll=1.92
+[slice] tilt=3.87->-4.92 deg raw=657 accepted=550 total=6740
+[scan] running: 10/10
+[slice] tilt=-5.80->-14.77 deg raw=661 accepted=538 total=7278
+[scan] running: 10/10
+[slice] tilt=-15.64->-24.43 deg raw=661 accepted=573 total=7851
+[scan] running: 10/10
+[slice] tilt=-25.31->-34.19 deg raw=665 accepted=567 total=8418
+[scan] running: 10/10
+[slice] tilt=-35.24->-43.42 deg raw=665 accepted=545 total=8963
+[scan] running: 10/10
+[slice] tilt=-44.03->-44.82 deg raw=665 accepted=533 total=9496
+[scan] running: 10/10
+[slice] tilt=-44.82->-44.82 deg raw=663 accepted=520 total=10016
+[scan] running: 10/10
+[scan] complete: 10/10
+[save] wrote 10016 points to host/test_logs/t03_step10.ply

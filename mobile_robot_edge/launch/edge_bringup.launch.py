@@ -73,6 +73,26 @@ def generate_launch_description():
         ]
     )
 
+    # LiderModule Node (XIAO ESP32-C3 + T-mini Pro + STS3215 tilt servo)
+    # Reads USB CDC binary protocol from /dev/ttyACM0
+    # Publishes: /scan (LaserScan), /lider/pointcloud2, /lider/imu
+    lider_module_node = Node(
+        package='mobile_robot_edge',
+        executable='lider_module_node',
+        name='lider_module_node',
+        output='screen',
+        parameters=[{
+            'port':                    '/dev/ttyACM0',
+            'scan_frame_id':           'laser_frame',
+            'imu_frame_id':            'imu_link',
+            'min_range_m':             0.02,
+            'max_range_m':             12.0,
+            'laser_scan_bins':         720,
+            'slice_timeout_s':         4.0,
+            'pointcloud_interval_s':   30.0,
+        }],
+    )
+
     # Motor Controller Node
     motor_controller_node = Node(
         package='mobile_robot_edge',
@@ -125,6 +145,9 @@ def generate_launch_description():
 
         # Start motor controller
         motor_controller_node,
+
+        # Start LiderModule (3D LiDAR tilt scanner → /scan + /lider/pointcloud2)
+        lider_module_node,
     ])
 
 
@@ -184,6 +207,25 @@ def get_robot_description():
     <child link="camera_optical_frame"/>
     <!-- Rotate to optical frame convention: x=right, y=down, z=forward -->
     <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
+  </joint>
+
+  <!-- LiderModule laser frame (T-mini Pro tilt axis center) -->
+  <link name="laser_frame"/>
+
+  <joint name="laser_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="laser_frame"/>
+    <!-- Mounted on top of robot, 8 cm above base -->
+    <origin xyz="0.05 0 0.08" rpy="0 0 0"/>
+  </joint>
+
+  <!-- IMU frame (MPU6050 on LiderModule board) -->
+  <link name="imu_link"/>
+
+  <joint name="imu_joint" type="fixed">
+    <parent link="laser_frame"/>
+    <child link="imu_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
 </robot>

@@ -1,0 +1,46 @@
+[T05] pattern-scan
+[scan] loaded 24 angles from /home/pi/MobileRobot/LiderModule/計測パターン.csv mode=下方
+[scan] step 1/24: tilt=0.00 deg
+[imu] reference locked at tilt~0: pitch=0.50 roll=0.01
+[slice] tilt=-0.09->-0.09 deg raw=89 accepted=76 total=76
+[scan] step 2/24: tilt=-15.00 deg
+[scan] step 3/24: tilt=-30.00 deg
+[slice] tilt=-29.88->-29.88 deg raw=157 accepted=118 total=194
+[scan] step 4/24: tilt=-45.00 deg
+[scan] step 5/24: tilt=-42.50 deg
+[slice] tilt=-42.19->-42.19 deg raw=43 accepted=1 total=195
+[scan] step 6/24: tilt=-27.50 deg
+[slice] tilt=-27.42->-27.42 deg raw=123 accepted=102 total=297
+[scan] step 7/24: tilt=-12.50 deg
+[slice] tilt=-12.57->-12.57 deg raw=355 accepted=272 total=569
+[scan] step 8/24: tilt=0.00 deg
+[slice] tilt=-0.09->-0.09 deg raw=125 accepted=114 total=683
+[scan] step 9/24: tilt=-5.00 deg
+[slice] tilt=-4.75->-4.75 deg raw=353 accepted=288 total=971
+[scan] step 10/24: tilt=-20.00 deg
+[slice] tilt=-19.86->-19.86 deg raw=127 accepted=114 total=1085
+[scan] step 11/24: tilt=-35.00 deg
+[slice] tilt=-34.80->-34.80 deg raw=319 accepted=208 total=1293
+[scan] step 12/24: tilt=-45.00 deg
+[scan] step 13/24: tilt=-37.50 deg
+[slice] tilt=-37.35->-37.35 deg raw=81 accepted=0 total=1293
+[scan] step 14/24: tilt=-22.50 deg
+[slice] tilt=-22.59->-22.59 deg raw=279 accepted=246 total=1539
+[scan] step 15/24: tilt=-7.50 deg
+[scan] step 16/24: tilt=0.00 deg
+[scan] step 17/24: tilt=-10.00 deg
+[scan] step 18/24: tilt=-25.00 deg
+[slice] tilt=-24.87->-24.87 deg raw=133 accepted=115 total=1654
+[scan] step 19/24: tilt=-40.00 deg
+[slice] tilt=-39.90->-39.90 deg raw=355 accepted=244 total=1898
+[scan] step 20/24: tilt=-45.00 deg
+[slice] tilt=-44.82->-44.82 deg raw=123 accepted=46 total=1944
+[scan] step 21/24: tilt=-32.50 deg
+[slice] tilt=-32.43->-32.43 deg raw=355 accepted=265 total=2209
+[scan] step 22/24: tilt=-17.50 deg
+[slice] tilt=-17.58->-17.58 deg raw=123 accepted=97 total=2306
+[scan] step 23/24: tilt=-2.50 deg
+[slice] tilt=-2.64->-2.64 deg raw=357 accepted=296 total=2602
+[scan] step 24/24: tilt=0.00 deg
+[slice] tilt=-0.09->-0.09 deg raw=127 accepted=117 total=2719
+[save] wrote 2719 points to host/test_logs/t05_pattern.ply

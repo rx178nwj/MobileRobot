@@ -29,6 +29,7 @@ setup(
             'ws_odometry_publisher = mobile_robot_edge.ws_odometry_publisher:main',
             'ws_motor_controller   = mobile_robot_edge.ws_motor_controller:main',
             'ws_camera_bridge      = mobile_robot_edge.ws_camera_bridge:main',
+            'lider_module_node     = mobile_robot_edge.lider_module_node:main',
         ],
     },
 )

@@ -11,8 +11,9 @@ Data flow:
   /odom                          │
   TF: odom → base_footprint      ┘
 
-  ⓪ ydlidar_ros2_driver  (YDLIDAR T-mini Plus)
-        /dev/ttyUSB0  →  /scan (LaserScan, 360°, 10 Hz)
+  ⓪ lider_module_node  (RPi edge, LiderModule: T-mini Pro + STS3215 tilt)
+        /dev/ttyACM0 (USB CDC)  →  /scan (LaserScan, ~5 Hz)  via Zenoh
+        also publishes /lider/pointcloud2, /lider/imu
 
   ① image_transport/republish
         /camera/image_raw/compressed  →  /camera/image_raw
@@ -77,11 +78,9 @@ from nav2_common.launch import RewrittenYaml
 
 def generate_launch_description():
     pkg_server  = get_package_share_directory('mobile_robot_server')
-    pkg_ydlidar = get_package_share_directory('ydlidar_ros2_driver')
 
-    slam_cfg    = os.path.join(pkg_server,  'config', 'slam_toolbox_params.yaml')
-    nav2_cfg    = os.path.join(pkg_server,  'config', 'nav2_params.yaml')
-    lidar_cfg   = os.path.join(pkg_ydlidar, 'params', 'Tmini.yaml')
+    slam_cfg    = os.path.join(pkg_server, 'config', 'slam_toolbox_params.yaml')
+    nav2_cfg    = os.path.join(pkg_server, 'config', 'nav2_params.yaml')
 
     # ---- Launch arguments ----
     use_sim_time    = DeclareLaunchArgument('use_sim_time',    default_value='false')
@@ -91,10 +90,6 @@ def generate_launch_description():
     delete_db       = DeclareLaunchArgument(
         'delete_db_on_start', default_value='true',
         description='(unused) kept for backward compat')
-
-    lidar_port = DeclareLaunchArgument(
-        'lidar_port', default_value='/dev/ttyUSB0',
-        description='YDLIDAR T-mini Plus serial port')
 
     autonomous_mapping_arg = DeclareLaunchArgument(
         'autonomous_mapping', default_value='false',
@@ -188,20 +183,10 @@ def generate_launch_description():
     )
 
     # ------------------------------------------------------------------
-    # ⓪ YDLIDAR T-mini Plus
-    #    /scan (sensor_msgs/LaserScan) @ 10 Hz, 360°, 0.03–12 m
+    # ⓪ /scan は RPi エッジ側の lider_module_node が Zenoh 経由で配信
+    #    (LiderModule: XIAO ESP32-C3 + YDLIDAR T-mini Pro + STS3215 tilt)
+    #    → サーバー側に ydlidar_ros2_driver は不要
     # ------------------------------------------------------------------
-    ydlidar = Node(
-        package='ydlidar_ros2_driver',
-        executable='ydlidar_ros2_driver_node',
-        name='ydlidar_ros2_driver_node',
-        output='screen',
-        parameters=[
-            lidar_cfg,
-            {'port': LaunchConfiguration('lidar_port')},
-            {'use_sim_time': LaunchConfiguration('use_sim_time')},
-        ],
-    )
 
     # ------------------------------------------------------------------
     # ① Image decompression
@@ -452,7 +437,6 @@ def generate_launch_description():
         linear_speed,
         angular_speed,
         delete_db,
-        lidar_port,
         llm_base_url,
         llm_model,
         yolo_model,
@@ -461,7 +445,6 @@ def generate_launch_description():
         ws_motor,
         ws_odom,
         ws_camera,
-        ydlidar,
         image_decompress,
         slam,
         lifecycle_manager_slam,
