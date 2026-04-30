@@ -20,8 +20,10 @@ WebSocket Endpoints:
 
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument, ExecuteProcess
-from launch.substitutions import LaunchConfiguration
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration, Command, PathJoinSubstitution
+from launch_ros.substitutions import FindPackageShare
+from launch.substitutions import FindExecutable
 
 
 def generate_launch_description():
@@ -74,13 +76,23 @@ def generate_launch_description():
     )
 
     # Robot State Publisher for TF tree
+    robot_description = Command([
+        FindExecutable(name='xacro'),
+        ' ',
+        PathJoinSubstitution([
+            FindPackageShare('mobile_robot_edge'),
+            'urdf',
+            'mobile_robot.urdf.xacro',
+        ]),
+    ])
+
     robot_state_publisher = Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
         name='robot_state_publisher',
         output='screen',
         parameters=[{
-            'robot_description': get_robot_description(),
+            'robot_description': robot_description,
         }],
     )
 
@@ -93,14 +105,15 @@ def generate_launch_description():
         name='lider_module_node',
         output='screen',
         parameters=[{
-            'port':                    '/dev/ttyACM0',
+            'port':                    '/dev/lider_module',
             'scan_frame_id':           'laser_frame',
             'imu_frame_id':            'imu_link',
             'min_range_m':             0.02,
             'max_range_m':             12.0,
             'laser_scan_bins':         720,
             'slice_timeout_s':         4.0,
-            'pointcloud_interval_s':   30.0,
+            'pointcloud_interval_s':   2.0,
+            'min_quality':             0,
         }],
         respawn=True,
         respawn_delay=5.0,
@@ -115,62 +128,3 @@ def generate_launch_description():
         robot_state_publisher,
         lider_module_node,
     ])
-
-
-def get_robot_description():
-    """
-    Get robot URDF description
-
-    TODO: Create proper URDF file
-    For now, return minimal URDF with basic links
-    """
-    urdf = """<?xml version="1.0"?>
-<robot name="mobile_robot">
-  <!-- Base footprint (ground projection) -->
-  <link name="base_footprint"/>
-
-  <!-- Base link (robot center) -->
-  <link name="base_link">
-    <visual>
-      <geometry>
-        <box size="0.2 0.16 0.1"/>
-      </geometry>
-      <origin xyz="0 0 0.05"/>
-    </visual>
-  </link>
-
-  <joint name="base_footprint_to_base_link" type="fixed">
-    <parent link="base_footprint"/>
-    <child link="base_link"/>
-    <origin xyz="0 0 0.033"/>
-  </joint>
-
-  <!-- Camera link -->
-  <link name="camera_link"/>
-
-  <joint name="base_link_to_camera" type="fixed">
-    <parent link="base_link"/>
-    <child link="camera_link"/>
-    <origin xyz="0.1 0 0.1" rpy="0 0 0"/>
-  </joint>
-
-  <!-- LiderModule laser frame -->
-  <link name="laser_frame"/>
-
-  <joint name="base_link_to_laser" type="fixed">
-    <parent link="base_link"/>
-    <child link="laser_frame"/>
-    <origin xyz="0.05 0 0.08" rpy="0 0 0"/>
-  </joint>
-
-  <!-- IMU frame (MPU6050 on LiderModule) -->
-  <link name="imu_link"/>
-
-  <joint name="laser_to_imu" type="fixed">
-    <parent link="laser_frame"/>
-    <child link="imu_link"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
-  </joint>
-</robot>
-"""
-    return urdf

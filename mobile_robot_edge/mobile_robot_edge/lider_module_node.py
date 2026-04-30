@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""
-LiderModule ROS2 Node
-
-Reads from LiderModule (XIAO ESP32-C3 + YDLIDAR T-mini Pro + STS3215 servo)
-via USB CDC binary protocol on /dev/ttyACM0.
-
-Published topics:
-  /scan                 sensor_msgs/LaserScan    ~5 Hz  (tilt=0° horizontal scan)
-  /lider/pointcloud2    sensor_msgs/PointCloud2  periodic (DOWN_ANGLES 24-step pattern)
-  /lider/imu            sensor_msgs/Imu          50 Hz
-
-Protocol: LiderModule/docs/USB_CDC_COMMAND_MANUAL.md
-"""
+"""LiderModule ROS2 node for SLAM 2.5D."""
 
 import math
 import queue
@@ -62,6 +50,8 @@ class ImuData:
 @dataclass
 class ScanSlice:
     tilt_deg: float
+    tilt_start_deg: float
+    tilt_end_deg: float
     imu_pitch: float
     imu_roll: float
     points: List[Tuple[float, int, int]]  # (angle_deg, dist_mm, quality)
@@ -102,15 +92,34 @@ def _decode_payload(msg_type: int, payload: bytes):
         return ScanStatus(state, step, total)
 
     if msg_type == MSG_SCAN_SLICE and len(payload) >= 14:
-        tilt, imu_pitch, imu_roll, count = struct.unpack_from('<fffH', payload, 0)
-        raw = payload[14:]
+        use_extended = False
+        if len(payload) >= 22:
+            ext_count = struct.unpack_from('<H', payload, 20)[0]
+            use_extended = (22 + ext_count * 5) == len(payload)
+
+        if use_extended:
+            tilt_deg, tilt_start_deg, tilt_end_deg, imu_pitch, imu_roll, count = struct.unpack_from('<fffffH', payload, 0)
+            header_size = 22
+        else:
+            tilt_deg, imu_pitch, imu_roll, count = struct.unpack_from('<fffH', payload, 0)
+            tilt_start_deg = tilt_deg
+            tilt_end_deg = tilt_deg
+            header_size = 14
+        raw = payload[header_size:]
         points: List[Tuple[float, int, int]] = []
         for i in range(count):
             if i * 5 + 5 > len(raw):
                 break
             ax100, dist_mm, quality = struct.unpack_from('<HHB', raw, i * 5)
             points.append((ax100 / 100.0, dist_mm, quality))
-        return ScanSlice(tilt, imu_pitch, imu_roll, points)
+        return ScanSlice(
+            tilt_deg=tilt_deg,
+            tilt_start_deg=tilt_start_deg,
+            tilt_end_deg=tilt_end_deg,
+            imu_pitch=imu_pitch,
+            imu_roll=imu_roll,
+            points=points,
+        )
 
     return None
 
@@ -170,15 +179,16 @@ class LiderModuleNode(Node):
         super().__init__('lider_module_node')
 
         # ── Parameters ───────────────────────────────────────────────────
-        self.declare_parameter('port',               '/dev/ttyACM0')
+        self.declare_parameter('port',               '/dev/lider_module')
         self.declare_parameter('scan_frame_id',      'laser_frame')
         self.declare_parameter('imu_frame_id',       'imu_link')
         self.declare_parameter('min_range_m',        0.02)
         self.declare_parameter('max_range_m',        12.0)
         self.declare_parameter('laser_scan_bins',    720)   # 0.5° angular resolution
         self.declare_parameter('slice_timeout_s',    4.0)
-        self.declare_parameter('pointcloud_interval_s', 30.0)  # 0 to disable
+        self.declare_parameter('pointcloud_interval_s', 2.0)   # 0 to disable
         self.declare_parameter('tilt_axis_offset_m', 0.023)    # sensor center above tilt axis
+        self.declare_parameter('min_quality', 0)
 
         self._port         = self.get_parameter('port').value
         self._scan_frame   = self.get_parameter('scan_frame_id').value
@@ -189,6 +199,7 @@ class LiderModuleNode(Node):
         self._slice_timeout = self.get_parameter('slice_timeout_s').value
         self._pc_interval  = self.get_parameter('pointcloud_interval_s').value
         self._tilt_axis_offset_m = self.get_parameter('tilt_axis_offset_m').value
+        self._min_quality = int(self.get_parameter('min_quality').value)
 
         # ── QoS ──────────────────────────────────────────────────────────
         sensor_qos = QoSProfile(
@@ -378,6 +389,8 @@ class LiderModuleNode(Node):
         max_mm = int(self._max_range * 1000)
 
         for angle_deg, dist_mm, quality in sl.points:
+            if quality < self._min_quality:
+                continue
             if not (min_mm <= dist_mm <= max_mm):
                 continue
             # T-mini Pro reports 0–360°; convert to −180…+180 for LaserScan
@@ -430,21 +443,26 @@ class LiderModuleNode(Node):
           Y = left
           Z = up
         """
-        valid = [(math.radians(a), d / 1000.0)
-                 for a, d, _ in sl.points if 20 <= d <= 12000]
-        if not valid:
+        valid_points = [(a, d) for a, d, q in sl.points if q >= self._min_quality and 20 <= d <= 12000]
+        if not valid_points:
             return np.zeros((0, 3), dtype=np.float32)
 
-        angles = np.array([v[0] for v in valid], dtype=np.float64)
-        dists  = np.array([v[1] for v in valid], dtype=np.float64)
+        count = len(valid_points)
+        angles = np.array([math.radians(v[0]) for v in valid_points], dtype=np.float64)
+        dists = np.array([v[1] / 1000.0 for v in valid_points], dtype=np.float64)
+        tilts = np.linspace(
+            math.radians(sl.tilt_start_deg),
+            math.radians(sl.tilt_end_deg),
+            count,
+            dtype=np.float64,
+        )
 
         x_l = dists * np.cos(angles)
         y_l = dists * np.sin(angles)
 
-        tilt = math.radians(sl.tilt_deg)
-        X = x_l * math.cos(tilt) + self._tilt_axis_offset_m * math.sin(tilt)
+        X = x_l * np.cos(tilts) + self._tilt_axis_offset_m * np.sin(tilts)
         Y = y_l
-        Z = -x_l * math.sin(tilt) + self._tilt_axis_offset_m * math.cos(tilt)
+        Z = -x_l * np.sin(tilts) + self._tilt_axis_offset_m * np.cos(tilts)
 
         pts = np.stack([X, Y, Z], axis=1)
 

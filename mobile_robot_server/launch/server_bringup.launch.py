@@ -71,8 +71,10 @@ from ament_index_python.packages import get_package_share_directory, PackageNotF
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, Command, PathJoinSubstitution
 from launch_ros.actions import Node, SetParameter
+from launch_ros.substitutions import FindPackageShare
+from launch.substitutions import FindExecutable
 from nav2_common.launch import RewrittenYaml
 
 
@@ -149,27 +151,15 @@ def generate_launch_description():
         respawn=True, respawn_delay=5.0,
     )
 
-    robot_urdf = (
-        '<?xml version="1.0"?>'
-        '<robot name="mobile_robot">'
-        '<link name="base_footprint"/>'
-        '<link name="base_link"/>'
-        '<joint name="base_footprint_joint" type="fixed">'
-        '<parent link="base_footprint"/><child link="base_link"/>'
-        '<origin xyz="0 0 0.033"/>'
-        '</joint>'
-        '<link name="laser_frame"/>'
-        '<joint name="laser_joint" type="fixed">'
-        '<parent link="base_link"/><child link="laser_frame"/>'
-        '<origin xyz="0.05 0 0.08"/>'
-        '</joint>'
-        '<link name="camera_optical_frame"/>'
-        '<joint name="camera_joint" type="fixed">'
-        '<parent link="base_link"/><child link="camera_optical_frame"/>'
-        '<origin xyz="0.10 0 0.10" rpy="-1.5708 0 -1.5708"/>'
-        '</joint>'
-        '</robot>'
-    )
+    robot_urdf = Command([
+        FindExecutable(name='xacro'),
+        ' ',
+        PathJoinSubstitution([
+            FindPackageShare('mobile_robot_edge'),
+            'urdf',
+            'mobile_robot.urdf.xacro',
+        ]),
+    ])
 
     robot_state_pub = Node(
         package='robot_state_publisher',
