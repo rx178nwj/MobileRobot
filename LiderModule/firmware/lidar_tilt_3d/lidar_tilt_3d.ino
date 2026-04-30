@@ -70,6 +70,7 @@ struct LidarPoint {
 static LidarPoint scanPoints[MAX_SCAN_POINTS];
 static uint16_t scanCount = 0;
 static volatile bool scanReady = false;
+static bool hasSentSliceInCurrentScan = false;
 
 static float imuPitch = 0.0f;
 static float imuRoll = 0.0f;
@@ -526,6 +527,13 @@ static void updateSweepCommand() {
 static void startScan(float minA, float maxA, float stepA) {
   tiltMin = constrain(minA, -TILT_SAFE_LIMIT, TILT_SAFE_LIMIT);
   tiltMax = constrain(maxA, -TILT_SAFE_LIMIT, TILT_SAFE_LIMIT);
+  // Single-angle requests are fragile in continuous-sweep mode.
+  // Expand to a narrow sweep so at least one full LiDAR revolution can be captured.
+  if (fabsf(tiltMax - tiltMin) < 0.2f) {
+    float center = 0.5f * (tiltMin + tiltMax);
+    tiltMin = constrain(center - 2.0f, -TILT_SAFE_LIMIT, TILT_SAFE_LIMIT);
+    tiltMax = constrain(center + 2.0f, -TILT_SAFE_LIMIT, TILT_SAFE_LIMIT);
+  }
   tiltStep = stepA > 0.0f ? stepA : TILT_STEP_DEFAULT;
   if (tiltMax < tiltMin) {
     float t = tiltMin;
@@ -545,6 +553,7 @@ static void startScan(float minA, float maxA, float stepA) {
   currentTilt = tiltMin;
   setTiltAngle(currentTilt);
   resetLidarScan();
+  hasSentSliceInCurrentScan = false;
   captureTiltStart = currentTilt;
   captureTiltEnd = currentTilt;
   scanState = S3D_PREPARE;
@@ -558,7 +567,9 @@ static void stopScan() {
   lidarStopMotor();
   resetLidarScan();
   setTiltAngle(0.0f);
-  sendStatus(2, stepIndex, totalSteps);
+  if (hasSentSliceInCurrentScan) {
+    sendStatus(2, stepIndex, totalSteps);
+  }
 }
 
 static void updateScanState() {
@@ -575,9 +586,12 @@ static void updateScanState() {
     case S3D_SWEEPING:
       updateSweepCommand();
       if (scanReady) {
-        sendScanSlice();
+        if (scanCount >= CAPTURE_MIN_POINTS) {
+          sendScanSlice();
+          hasSentSliceInCurrentScan = true;
+          slicesSent++;
+        }
         resetLidarScan();
-        slicesSent++;
         uint16_t progress = slicesSent;
         if (progress > totalSteps) {
           progress = totalSteps;
@@ -597,9 +611,12 @@ static void updateScanState() {
     case S3D_FINALIZING:
       setTiltAngle(tiltMin);
       if (scanReady) {
-        sendScanSlice();
+        if (scanCount >= CAPTURE_MIN_POINTS) {
+          sendScanSlice();
+          hasSentSliceInCurrentScan = true;
+          slicesSent++;
+        }
         resetLidarScan();
-        slicesSent++;
         uint16_t progress = slicesSent;
         if (progress > totalSteps) {
           progress = totalSteps;
@@ -612,8 +629,11 @@ static void updateScanState() {
       break;
     case S3D_COMPLETE:
       setTiltAngle(0.0f);
-      lidarStopMotor();
-      sendStatus(2, totalSteps, totalSteps);
+      // Keep LiDAR motor spinning across scan cycles.
+      // Motor stop is handled only by explicit CMD_SCAN_STOP.
+      if (hasSentSliceInCurrentScan) {
+        sendStatus(2, totalSteps, totalSteps);
+      }
       scanState = S3D_IDLE;
       break;
   }

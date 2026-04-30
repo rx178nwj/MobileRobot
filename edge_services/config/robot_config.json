@@ -22,7 +22,7 @@
     "usb_port": "/dev/pr2040"
   },
   "camera_service": {
-    "enabled": true,
+    "enabled": false,
     "host": "0.0.0.0",
     "port": 8003,
     "device": "/dev/video0",

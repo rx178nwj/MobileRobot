@@ -45,6 +45,16 @@ def generate_launch_description():
         default_value='/cmd_vel',
         description='Topic name for velocity commands'
     )
+    pointcloud_interval_arg = DeclareLaunchArgument(
+        'pointcloud_interval_s',
+        default_value='6.0',
+        description='3D pointcloud interval seconds'
+    )
+    scan_priority_cycles_arg = DeclareLaunchArgument(
+        'scan_priority_cycles_before_3d',
+        default_value='15',
+        description='Number of 2D scan cycles before allowing 3D sweep'
+    )
 
     # WebSocket Motor Controller Node
     ws_motor_controller = Node(
@@ -111,8 +121,12 @@ def generate_launch_description():
             'min_range_m':             0.02,
             'max_range_m':             12.0,
             'laser_scan_bins':         720,
-            'slice_timeout_s':         4.0,
-            'pointcloud_interval_s':   2.0,
+            'slice_timeout_s':         6.0,
+            'pointcloud_interval_s':   LaunchConfiguration('pointcloud_interval_s'),
+            'sweep_tilt_min_deg':      -45.0,
+            'sweep_tilt_max_deg':      45.0,
+            'sweep_tilt_step_deg':     2.0,
+            'scan_priority_cycles_before_3d': LaunchConfiguration('scan_priority_cycles_before_3d'),
             'min_quality':             0,
         }],
         respawn=True,
@@ -123,6 +137,8 @@ def generate_launch_description():
         motor_ws_uri_arg,
         odom_ws_uri_arg,
         cmd_vel_topic_arg,
+        pointcloud_interval_arg,
+        scan_priority_cycles_arg,
         ws_motor_controller,
         ws_odometry_publisher,
         robot_state_publisher,

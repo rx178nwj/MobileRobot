@@ -28,17 +28,6 @@ CMD_SERVO_ANGLE = 0x10
 CMD_SCAN_START  = 0x12
 CMD_SCAN_STOP   = 0x13
 
-# 24-step downward scan pattern from USB_CDC_COMMAND_MANUAL.md §6
-DOWN_ANGLES: List[float] = [
-    0.0,   -15.0, -30.0, -45.0,
-    -42.5, -27.5, -12.5,  0.0,
-    -5.0,  -20.0, -35.0, -45.0,
-    -37.5, -22.5,  -7.5,  0.0,
-    -10.0, -25.0, -40.0, -45.0,
-    -32.5, -17.5,  -2.5,  0.0,
-]
-
-
 # ── Data classes ──────────────────────────────────────────────────────────────
 @dataclass
 class ImuData:
@@ -185,10 +174,14 @@ class LiderModuleNode(Node):
         self.declare_parameter('min_range_m',        0.02)
         self.declare_parameter('max_range_m',        12.0)
         self.declare_parameter('laser_scan_bins',    720)   # 0.5° angular resolution
-        self.declare_parameter('slice_timeout_s',    4.0)
-        self.declare_parameter('pointcloud_interval_s', 2.0)   # 0 to disable
+        self.declare_parameter('slice_timeout_s',    6.0)
+        self.declare_parameter('pointcloud_interval_s', 6.0)   # 0 to disable
         self.declare_parameter('tilt_axis_offset_m', 0.023)    # sensor center above tilt axis
+        self.declare_parameter('sweep_tilt_min_deg', -45.0)
+        self.declare_parameter('sweep_tilt_max_deg', 45.0)
+        self.declare_parameter('sweep_tilt_step_deg', 2.0)
         self.declare_parameter('min_quality', 0)
+        self.declare_parameter('scan_priority_cycles_before_3d', 15)
 
         self._port         = self.get_parameter('port').value
         self._scan_frame   = self.get_parameter('scan_frame_id').value
@@ -199,7 +192,13 @@ class LiderModuleNode(Node):
         self._slice_timeout = self.get_parameter('slice_timeout_s').value
         self._pc_interval  = self.get_parameter('pointcloud_interval_s').value
         self._tilt_axis_offset_m = self.get_parameter('tilt_axis_offset_m').value
+        self._sweep_tilt_min = float(self.get_parameter('sweep_tilt_min_deg').value)
+        self._sweep_tilt_max = float(self.get_parameter('sweep_tilt_max_deg').value)
+        self._sweep_tilt_step = float(self.get_parameter('sweep_tilt_step_deg').value)
         self._min_quality = int(self.get_parameter('min_quality').value)
+        self._scan_priority_cycles = int(
+            self.get_parameter('scan_priority_cycles_before_3d').value
+        )
 
         # ── QoS ──────────────────────────────────────────────────────────
         sensor_qos = QoSProfile(
@@ -232,19 +231,30 @@ class LiderModuleNode(Node):
             daemon=True,
         )
         self._rx_thread.start()
+        self._last_rx_thread_alive = True
+        self._last_reconnect_attempt = 0.0
 
         # ── Scan state machine ────────────────────────────────────────────
-        # States: 'init_stop' | 'init_zero' | 'idle' | 'waiting_2d' | '3d_scan' | '3d_wait'
+        # States: 'init_stop' | 'init_zero' | 'idle' | 'waiting_2d' | 'waiting_2d_complete_pending' | '3d_wait_complete'
         self._state              = 'init_stop'
         self._init_time          = time.monotonic()
         self._pending_slice: Optional[ScanSlice] = None
         self._slice_deadline     = 0.0
-        self._3d_step            = 0
+        self._complete_grace_deadline = 0.0
         self._3d_slices: List[ScanSlice] = []
         self._last_3d_time       = time.monotonic()
+        self._sweep_reverse = False
+        self._scan_cycles_since_3d = 0
+        self._scan_pub_count_total = 0
+        self._scan_pub_count_window = 0
+        self._slice_rx_count_total = 0
+        self._slice_rx_points_window = 0
+        self._status_running_count_window = 0
+        self._status_complete_count_window = 0
 
         # ── Main loop at 100 Hz ───────────────────────────────────────────
         self._timer = self.create_timer(0.01, self._loop)
+        self._metrics_timer = self.create_timer(1.0, self._publish_metrics)
 
         self.get_logger().info(
             f'LiderModuleNode started — port={self._port} '
@@ -265,8 +275,48 @@ class LiderModuleNode(Node):
 
     # ── Main loop (timer callback, non-blocking) ──────────────────────────────
     def _loop(self) -> None:
+        self._ensure_serial_alive()
         self._drain_rx()
         self._step_state_machine()
+
+    def _ensure_serial_alive(self) -> None:
+        alive = self._rx_thread.is_alive()
+        if alive:
+            self._last_rx_thread_alive = True
+            return
+
+        now = time.monotonic()
+        if self._last_rx_thread_alive:
+            self.get_logger().warn(
+                'Serial RX thread stopped; attempting reconnect'
+            )
+            self._last_rx_thread_alive = False
+        if now - self._last_reconnect_attempt < 1.0:
+            return
+        self._last_reconnect_attempt = now
+
+        try:
+            self._stop_event.set()
+            try:
+                self._ser.close()
+            except Exception:
+                pass
+            self._ser = serial.Serial(
+                self._port, 921600, timeout=0.05, write_timeout=1)
+            self._ser.dtr = False
+            self._ser.rts = False
+            self._stop_event = threading.Event()
+            self._rx_thread = threading.Thread(
+                target=_reader_loop,
+                args=(self._ser, self._rx_queue, self._stop_event),
+                daemon=True,
+            )
+            self._rx_thread.start()
+            if self._rx_thread.is_alive():
+                self.get_logger().info('Serial reconnect succeeded')
+                self._last_rx_thread_alive = True
+        except Exception as e:
+            self.get_logger().warn(f'Serial reconnect failed: {e}')
 
     def _drain_rx(self) -> None:
         while True:
@@ -276,6 +326,20 @@ class LiderModuleNode(Node):
                 break
             self._handle_msg(msg)
 
+    def _publish_metrics(self) -> None:
+        self.get_logger().info(
+            f'/scan publish rate={self._scan_pub_count_window} Hz '
+            f'total={self._scan_pub_count_total} state={self._state} '
+            f'slice_rx={self._slice_rx_count_total} '
+            f'slice_pts_window={self._slice_rx_points_window} '
+            f'status_running_window={self._status_running_count_window} '
+            f'status_complete_window={self._status_complete_count_window}'
+        )
+        self._scan_pub_count_window = 0
+        self._slice_rx_points_window = 0
+        self._status_running_count_window = 0
+        self._status_complete_count_window = 0
+
     def _handle_msg(self, msg) -> None:
         now_ros = self.get_clock().now().to_msg()
 
@@ -283,26 +347,40 @@ class LiderModuleNode(Node):
             self._publish_imu(msg, now_ros)
 
         elif isinstance(msg, ScanSlice):
-            self._pending_slice = msg
+            self._slice_rx_count_total += 1
+            self._slice_rx_points_window += len(msg.points)
+            if self._state == '3d_wait_complete':
+                self._3d_slices.append(msg)
+            else:
+                self._pending_slice = msg
 
         elif isinstance(msg, ScanStatus):
+            if msg.state == 1:
+                self._status_running_count_window += 1
             if msg.state == 2:  # complete
+                self._status_complete_count_window += 1
                 self._on_scan_complete()
 
     def _on_scan_complete(self) -> None:
         if self._state == 'waiting_2d':
             if self._pending_slice is not None:
+                scan_msg = self._slice_to_laser_scan(self._pending_slice)
                 self._scan_pub.publish(
-                    self._slice_to_laser_scan(self._pending_slice))
+                    scan_msg)
                 self._pending_slice = None
+                self._scan_cycles_since_3d += 1
+                self._scan_pub_count_total += 1
+                self._scan_pub_count_window += 1
+            else:
+                # ScanStatus(complete) may arrive slightly earlier than ScanSlice.
+                # Wait briefly before declaring this cycle as dropped.
+                self._complete_grace_deadline = time.monotonic() + 0.15
+                self._state = 'waiting_2d_complete_pending'
+                return
             self._state = 'idle'
 
-        elif self._state == '3d_wait':
-            if self._pending_slice is not None:
-                self._3d_slices.append(self._pending_slice)
-                self._pending_slice = None
-            self._3d_step += 1
-            self._state = '3d_scan'  # advance in next loop tick
+        elif self._state == '3d_wait_complete':
+            self._finish_3d()
 
     def _step_state_machine(self) -> None:
         now = time.monotonic()
@@ -322,7 +400,11 @@ class LiderModuleNode(Node):
             if now - self._init_time < 0.2:
                 return
             # Check if 3D scan is due
-            if self._pc_interval > 0 and now - self._last_3d_time >= self._pc_interval:
+            if (
+                self._pc_interval > 0
+                and now - self._last_3d_time >= self._pc_interval
+                and self._scan_cycles_since_3d >= self._scan_priority_cycles
+            ):
                 self._start_3d()
             else:
                 self._request_slice(0.0)
@@ -333,29 +415,44 @@ class LiderModuleNode(Node):
                 self.get_logger().warn('2D slice timeout, retrying')
                 self._request_slice(0.0)
 
-        elif self._state == '3d_scan':
-            if self._3d_step >= len(DOWN_ANGLES):
-                self._finish_3d()
-            else:
-                self._request_slice(DOWN_ANGLES[self._3d_step])
-                self._state = '3d_wait'
-
-        elif self._state == '3d_wait':
-            if now > self._slice_deadline:
+        elif self._state == 'waiting_2d_complete_pending':
+            if self._pending_slice is not None:
+                scan_msg = self._slice_to_laser_scan(self._pending_slice)
+                self._scan_pub.publish(scan_msg)
+                self._pending_slice = None
+                self._scan_cycles_since_3d += 1
+                self._scan_pub_count_total += 1
+                self._scan_pub_count_window += 1
+                self._state = 'idle'
+            elif now > self._complete_grace_deadline:
                 self.get_logger().warn(
-                    f'3D step {self._3d_step} timeout, skipping')
-                self._3d_step += 1
-                self._state = '3d_scan'
+                    'scan complete with no slice after grace wait'
+                )
+                self._state = 'idle'
+
+        elif self._state == '3d_wait_complete':
+            if now > self._slice_deadline:
+                self.get_logger().warn('3D sweep timeout')
+                self._finish_3d()
 
     def _start_3d(self) -> None:
         self._3d_slices = []
-        self._3d_step = 0
-        self.get_logger().info('3D scan start')
-        self._state = '3d_scan'
+        a = self._sweep_tilt_min
+        b = self._sweep_tilt_max
+        if self._sweep_reverse:
+            a, b = b, a
+        self._sweep_reverse = not self._sweep_reverse
+        self._send(CMD_SCAN_START, struct.pack('<fff', a, b, self._sweep_tilt_step))
+        self._slice_deadline = time.monotonic() + max(self._slice_timeout, 20.0)
+        self.get_logger().info(
+            f'3D continuous sweep start: {a:.1f} -> {b:.1f} step={self._sweep_tilt_step:.1f}'
+        )
+        self._state = '3d_wait_complete'
 
     def _finish_3d(self) -> None:
         self._publish_pointcloud()
         self._last_3d_time = time.monotonic()
+        self._scan_cycles_since_3d = 0
         self._init_time = time.monotonic()
         self._state = 'idle'
 
@@ -409,11 +506,26 @@ class LiderModuleNode(Node):
     # ── 3D slices → PointCloud2 ───────────────────────────────────────────────
     def _publish_pointcloud(self) -> None:
         if not self._3d_slices:
+            self.get_logger().info('PointCloud2 skipped: no 3D slices')
             return
 
         parts = [self._slice_to_3d(sl) for sl in self._3d_slices]
-        points = np.vstack([p for p in parts if len(p)]).astype(np.float32)
+        non_empty_parts = [p for p in parts if len(p)]
+        total_raw_points = sum(len(sl.points) for sl in self._3d_slices)
+        total_valid_points = sum(len(p) for p in non_empty_parts)
+        if not non_empty_parts:
+            self.get_logger().warn(
+                f'PointCloud2 skipped: 3D slices={len(self._3d_slices)} '
+                f'raw_points={total_raw_points} valid_points={total_valid_points} '
+                f'min_quality={self._min_quality}'
+            )
+            return
+        points = np.vstack(non_empty_parts).astype(np.float32)
         if len(points) == 0:
+            self.get_logger().warn(
+                f'PointCloud2 skipped after stack: slices={len(self._3d_slices)} '
+                f'raw_points={total_raw_points} valid_points={total_valid_points}'
+            )
             return
 
         msg = PointCloud2()
