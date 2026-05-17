@@ -1,0 +1,79 @@
+# =============================================================================
+# RTAB-Map parameters — 3D Tilting LiDAR + Wheel Odometry (ICP SLAM)
+#
+# 構成: チルト式 2D LiDAR による疑似 3D PointCloud2 + ホイールオドメトリ
+#
+# データフロー:
+#   /lidar/points  (PointCloud2, ~0.3 Hz)  →  rtabmap  →  /map + TF(map→odom)
+#   TF odom→base_footprint→base_link (50 Hz) ↗  (subscribe_odom=false でTF経由取得)
+#
+# 動作モード: LiDAR-only ICP SLAM (カメラなし、オドメトリはTF経由)
+# =============================================================================
+
+rtabmap:
+  ros__parameters:
+
+    # ---- フレームID ----
+    # base_footprint (床レベル) を使用する。Grid/FootprintHeight の Z 基準が床面になり
+    # 占有グリッド生成で床点除外が正しく動作する。base_link は base_footprint 経由で到達可能。
+    frame_id:      base_footprint
+    odom_frame_id: odom
+    map_frame_id:  map
+
+    # ---- 購読モード (LiDAR-only ICP) ----
+    subscribe_depth:      false
+    subscribe_rgb:        false
+    subscribe_stereo:     false
+    subscribe_scan:       false
+    subscribe_scan_cloud: true   # 3D PointCloud2 を使用
+    subscribe_odom:       false  # TF経由でオドメトリ取得 (PointCloud2が低レートのため同期問題を回避)
+
+    # ---- ICP 登録パラメータ ----
+    Reg/Strategy:                  "1"     # 0=Visual, 1=ICP, 2=Visual+ICP
+    Icp/PointToPlane:              "false" # 点密度が低いため点対点を使用
+    Icp/VoxelSize:                 "0.05"  # 5cm ボクセルダウンサンプリング
+    Icp/MaxCorrespondenceDistance: "0.5"   # 最大対応点距離 [m]
+    Icp/Iterations:                "30"
+    Icp/MaxTranslation:            "0.5"   # 異常なマッチングを除外
+
+    # ---- ループクロージャ (ICP ベース) ----
+    RGBD/ProximityBySpace:     "true"   # 空間的に近いノードで ICP ループ検出
+    RGBD/ProximityMaxGraphDepth: "0"    # グラフ深度制限なし
+    RGBD/NeighborLinkRefining: "true"   # 隣接ノード間の ICP 精緻化
+    Kp/MaxFeatures:            "-1"     # 視覚特徴点なし
+    Vis/MinInliers:            "0"      # 視覚インライア不要
+    Reg/Force3DoF:             "true"   # 2D 平面移動に拘束（Z/pitch/roll を無視）
+
+    # ---- キーフレーム生成 ----
+    RGBD/LinearUpdate:  "0.10"   # 10cm 移動ごとに新ノード作成
+    RGBD/AngularUpdate: "0.087"  # ~5° 回転ごと
+
+    # ---- 2D 占有グリッドマップ生成 ----
+    RGBD/CreateOccupancyGrid: "true"
+    Grid/FromDepth:  "false"
+    Grid/Sensor:     "2"       # 0=depth, 1=scan, 2=scan_cloud (PointCloud2)
+    Grid/3D:         "false"   # 2D グリッドのみ
+    Grid/CellSize:   "0.05"    # 5cm 解像度
+    Grid/RangeMax:   "10.0"    # 10m 以内の点を使用
+    Grid/RangeMin:   "0.2"     # 近距離ノイズ除去
+    Grid/RayTracing: "true"    # レイトレーシングで空き空間を推定
+    Grid/FootprintHeight: "0.1" # 床面ノイズ除去 (Z < 0.1m の点を除外)
+
+    # ---- グラフ最適化 ----
+    Optimizer/Strategy:        "1"      # 0=TORO, 1=g2o
+    RGBD/OptimizeFromGraphEnd: "false"
+
+    # ---- メモリ管理 ----
+    Mem/STMSize:           "30"
+    Mem/IncrementalMemory: "true"
+    Mem/ReduceGraph:       "false"
+
+    # ---- ループ検出レート ----
+    Rtabmap/DetectionRate: "1"   # 1 Hz
+
+    # ---- QoS / 同期設定 ----
+    # subscribe_odom=false のため odom との同期は不要。PointCloud2 のみ RELIABLE で受信。
+    qos:             1    # 1=RELIABLE (PointCloud2)
+    qos_scan_cloud:  1
+    topic_queue_size: 10
+    sync_queue_size:  10

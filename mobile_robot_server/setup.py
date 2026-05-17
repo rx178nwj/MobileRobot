@@ -26,6 +26,7 @@ setup(
         'console_scripts': [
             'llm_nav_controller = mobile_robot_server.llm_nav_controller:main',
             'autonomous_mapping = mobile_robot_server.autonomous_mapping:main',
+            'lidar_pointcloud_bridge = mobile_robot_server.lidar_pointcloud_bridge:main',
         ],
     },
 )
